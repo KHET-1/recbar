@@ -1,0 +1,20 @@
+{
+    "position": "bottom",
+    "recording_path": "~/Videos/OBS",
+    "web_port": 5555,
+    "disk_warn_gb": 5.0,
+    "obs_host": "localhost",
+    "obs_port": 4455,
+    "mic_input_name": "Mic/Aux",
+    "scenes": {
+        "Desktop":      {"color": "#2196F3", "icon": "\ud83d\udda5\ufe0f"},
+        "Webcam":       {"color": "#4CAF50", "icon": "\ud83d\udcf7"},
+        "Screen Share": {"color": "#FF5722", "icon": "\ud83d\udcfa"},
+        "BRB":          {"color": "#9C27B0", "icon": "\u2615"}
+    },
+    "auto_scene_rules": [
+        {"match": "firefox", "scene": "Screen Share"},
+        {"match": "code",    "scene": "Desktop"}
+    ],
+    "auto_scene_default": "Desktop"
+}
