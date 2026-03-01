@@ -79,8 +79,26 @@ def get_font_family():
     return mono, emoji
 
 
+def detect_wayland_compositor():
+    """Detect which Wayland compositor is running.
+
+    Returns 'hyprland', 'sway', 'kde', 'gnome', or 'unknown'.
+    """
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+    if "hyprland" in desktop or os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return "hyprland"
+    if "sway" in desktop or os.environ.get("SWAYSOCK"):
+        return "sway"
+    if "kde" in desktop:
+        return "kde"
+    if "gnome" in desktop:
+        return "gnome"
+    return "unknown"
+
+
 # Module-level constants (computed once on import)
 SESSION_TYPE = detect_session_type()
 IS_X11 = SESSION_TYPE == "x11"
 IS_WAYLAND = SESSION_TYPE == "wayland"
 HAS_XDOTOOL = has_xdotool()
+WAYLAND_COMPOSITOR = detect_wayland_compositor() if IS_WAYLAND else ""

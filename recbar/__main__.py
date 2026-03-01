@@ -62,11 +62,16 @@ def main():
     bar = IndicatorBar(position)
     bar.show()
 
-    # Platform warnings
-    from .platform import HAS_XDOTOOL, IS_WAYLAND
-    if IS_WAYLAND:
-        print("  Note:      Wayland detected — auto-scene and XShape click-through unavailable")
-    elif not HAS_XDOTOOL:
+    # Platform info
+    from .platform import IS_WAYLAND, WAYLAND_COMPOSITOR
+    method = bar.auto_switcher.method
+    if method:
+        print(f"  Auto-scene: {method}")
+    elif IS_WAYLAND:
+        compositor = f" ({WAYLAND_COMPOSITOR})" if WAYLAND_COMPOSITOR else ""
+        print(f"  Note:      Wayland{compositor} — no auto-scene method found")
+        print("             Install hyprctl (Hyprland) or swaymsg (Sway) for auto-scene")
+    else:
         print("  Note:      xdotool not found — auto-scene switching disabled")
 
     print()

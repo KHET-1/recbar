@@ -109,13 +109,16 @@ def reload_config():
 
 def print_config_summary():
     """Print startup config info for diagnostics."""
-    from .platform import HAS_XDOTOOL, SESSION_TYPE
+    from .platform import SESSION_TYPE, WAYLAND_COMPOSITOR
+    session_info = SESSION_TYPE
+    if WAYLAND_COMPOSITOR:
+        session_info += f" ({WAYLAND_COMPOSITOR})"
     print(f"  Config:    {CONFIG_PATH}")
     print(f"  OBS:       {OBS_URL}")
     print(f"  Mic:       {MIC_NAME}")
     print(f"  Scenes:    {len(CFG['scenes'])} configured")
     print(f"  Rec path:  {RECORDING_PATH}")
     print(f"  Web port:  {WEB_PORT}")
-    print(f"  Session:   {SESSION_TYPE}" + ("" if HAS_XDOTOOL else " (xdotool not found)"))
+    print(f"  Session:   {session_info}")
     if AUTO_SCENE_RULES:
         print(f"  Auto-scene: {len(AUTO_SCENE_RULES)} rules")
