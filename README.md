@@ -15,9 +15,26 @@ RecBar sits at the edge of your screen and gives you always-visible recording aw
 - **Scene buttons** with emoji icons — click to switch
 - **Chapter marks** — timestamp moments during recording, exported to markdown
 - **Auto-scene switching** — automatically change OBS scenes based on active window
-- **Mobile web remote** — control OBS from your phone (zero install, just open a URL)
+- **Mobile web remote** — control OBS from your phone (token-authenticated, zero install)
 - **Reaction overlay** — floating emoji reactions that rise and fade
 - **Waveform visualization** — mirrored audio waveform at large size
+
+## Why RecBar
+
+No other Linux tool combines all of these in one lightweight package:
+
+| Feature | RecBar | OBS Core | Adv Scene Switcher | Touch Portal | Dream Deck |
+|---------|--------|----------|-------------------|--------------|------------|
+| Always-visible desktop bar | **Yes** | No | No | No | No |
+| Real mic VU (OBS peaks) | **Yes** | Basic | No | No | No |
+| Chapter marks + export | **Yes** | No | No | No | No |
+| Auto-scene switching | **Yes** | Plugin | **Yes** | No | No |
+| Mobile web remote | **Yes** | No | No | Yes (Wine) | Partial |
+| Reaction overlay | **Yes** | No | No | No | No |
+| Linux native | **Yes** | Yes | Yes | Wine only | Yes |
+| Zero mouse once running | **Yes** | No | No | No | No |
+
+RecBar is the only always-visible Linux-native desktop bar with real mic VU + chapters + mobile remote in one package.
 
 ## Install
 
@@ -29,6 +46,9 @@ pip install .
 
 # Or with the install script
 ./install.sh
+
+# With autostart on login
+./install.sh --autostart
 ```
 
 ### Dependencies
@@ -37,7 +57,7 @@ pip install .
 - PyQt6
 - websocket-client
 - xdotool (for auto-scene switching)
-- OBS Studio with WebSocket Server enabled (Tools → WebSocket Server Settings)
+- OBS Studio with WebSocket Server enabled (Tools -> WebSocket Server Settings)
 
 ## Usage
 
@@ -72,7 +92,13 @@ recbar-test                     # Run 14-step visual test suite
 
 ### Mobile Remote
 
-When RecBar launches, it starts a web server on port 5555. Open `http://YOUR_IP:5555` on your phone to get a full remote control with recording, scenes, reactions, and chapter marks.
+When RecBar launches, it prints a URL with a one-time auth token:
+
+```
+  Remote: http://192.168.1.100:5555?token=abc123...
+```
+
+Open that URL on your phone for full recording control — scenes, reactions, chapters, mic toggle. Token changes every launch. LAN-only.
 
 ## Configuration
 
@@ -104,18 +130,22 @@ Edit `~/.config/recbar/config.json`:
 ```
 recbar/
 ├── config.py          Config loading + constants
-├── state.py           Shared OBS state object
-├── obs_client.py      WebSocket command helper
-├── poller.py          Status polling thread
-├── volume_meter.py    Real-time mic levels
-├── auto_scene.py      Window-based scene switching
+├── state.py           Shared OBS state + signal bridge
+├── obs_connection.py  Single persistent WebSocket with message routing
+├── obs_client.py      Fire-and-forget command wrapper
+├── ipc.py             Unix socket IPC server/client
+├── poller.py          OBS status polling (shared connection)
+├── volume_meter.py    Real-time mic levels (callback handler)
+├── auto_scene.py      Window-based scene switching (xdotool)
 ├── chapters.py        Chapter marks + markdown export
-├── overlay.py         Reaction overlay + checklist
-├── web_remote.py      Mobile HTTP remote
-├── bar.py             Main indicator widget
-├── ctl.py             CLI control tool
+├── overlay.py         Reaction overlay + checklist (X11 click-through)
+├── web_remote.py      Mobile HTTP remote + token auth
+├── bar.py             Main indicator widget (8 paint helpers)
+├── ctl.py             CLI control (Unix socket + file fallback)
 └── test_suite.py      Visual test suite
 ```
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## License
 

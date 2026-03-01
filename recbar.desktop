@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RecBar
+Comment=OBS recording companion bar — mic VU, chapters, scenes, mobile remote
+Exec=recbar
+Icon=obs
+Terminal=false
+Categories=AudioVideo;Video;Utility;
+Keywords=obs;recording;streaming;indicator;bar;
+StartupNotify=false

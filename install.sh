@@ -58,6 +58,24 @@ else
     echo "  Config exists: $CONFIG_DIR/config.json (not overwritten)"
 fi
 
+# Install .desktop file (app launcher + autostart option)
+DESKTOP_SRC="$SCRIPT_DIR/recbar.desktop"
+if [ -f "$DESKTOP_SRC" ]; then
+    APPS_DIR="$HOME/.local/share/applications"
+    mkdir -p "$APPS_DIR"
+    cp "$DESKTOP_SRC" "$APPS_DIR/recbar.desktop"
+    echo "  Desktop entry: $APPS_DIR/recbar.desktop"
+
+    if [ "$1" = "--autostart" ] || [ "$2" = "--autostart" ]; then
+        AUTOSTART_DIR="$HOME/.config/autostart"
+        mkdir -p "$AUTOSTART_DIR"
+        cp "$DESKTOP_SRC" "$AUTOSTART_DIR/recbar.desktop"
+        echo "  Autostart: $AUTOSTART_DIR/recbar.desktop"
+    else
+        echo "  Tip: ./install.sh --autostart to launch RecBar on login"
+    fi
+fi
+
 echo ""
 echo "  Quick start:"
 echo "    recbar                     Launch the bar"

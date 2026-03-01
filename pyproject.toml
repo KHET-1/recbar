@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recbar"
-version = "1.0.0"
+version = "1.1.0"
 description = "Lightweight OBS recording companion bar — indicator, mic VU, chapters, auto-scene, mobile remote"
 readme = "README.md"
 license = "MIT"
