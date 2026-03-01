@@ -1,7 +1,6 @@
 """Tests for recbar.ipc — Unix socket IPC."""
 
 import os
-import tempfile
 
 import pytest
 

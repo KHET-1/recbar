@@ -4,9 +4,9 @@ Loads user config from ~/.config/recbar/config.json with sane defaults.
 All derived constants (OBS_URL, MIC_NAME, scene maps, etc.) are computed here.
 """
 
+import json
 import os
 import sys
-import json
 
 CONFIG_PATH = os.path.expanduser("~/.config/recbar/config.json")
 
@@ -41,7 +41,7 @@ def load_config():
         pass
     except json.JSONDecodeError as e:
         print(f"  WARNING: Config parse error in {config_file}: {e}", file=sys.stderr)
-        print(f"  Using defaults.", file=sys.stderr)
+        print("  Using defaults.", file=sys.stderr)
 
     return defaults
 
@@ -109,7 +109,7 @@ def reload_config():
 
 def print_config_summary():
     """Print startup config info for diagnostics."""
-    from .platform import SESSION_TYPE, HAS_XDOTOOL
+    from .platform import HAS_XDOTOOL, SESSION_TYPE
     print(f"  Config:    {CONFIG_PATH}")
     print(f"  OBS:       {OBS_URL}")
     print(f"  Mic:       {MIC_NAME}")

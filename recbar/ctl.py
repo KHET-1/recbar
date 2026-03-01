@@ -22,7 +22,6 @@ Usage:
     recbar-ctl cl_clear                   Dismiss checklist
 """
 
-import os
 import socket
 import sys
 

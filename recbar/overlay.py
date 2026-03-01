@@ -8,12 +8,12 @@ Uses X11 XShape extension for true click-through at the window server level.
 """
 
 import math
-import time
 import random
+import time
 
-from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
+from PyQt6.QtGui import QBrush, QColor, QFont, QPainter
+from PyQt6.QtWidgets import QApplication, QWidget
 
 # Late-import font detection to avoid circular imports
 _mono_font = None

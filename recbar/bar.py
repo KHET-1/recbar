@@ -13,27 +13,35 @@ Layout zones (proportional, snap on resize):
 import math
 import time
 
+from PyQt6.QtCore import QRect, Qt, QTimer
+from PyQt6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import QApplication, QWidget
-from PyQt6.QtCore import Qt, QTimer, QRect
-from PyQt6.QtGui import QFont, QPainter, QColor, QLinearGradient, QBrush, QPen
 
-from .config import (
-    CFG, CONFIG_PATH, SIZE_PRESETS, LAYOUT_ZONES,
-    SCENE_COLORS, SCENE_ICONS, DEFAULT_SCENE_COLOR, DEFAULT_SCENE_ICON,
-    IDLE_BG, MIC_NAME, DISK_WARN_GB, WEB_PORT, reload_config,
-)
-from .state import OBSState, SignalBridge
-from .obs_client import obs_cmd, set_connection
-from .obs_connection import OBSConnection
-from .overlay import ReactionOverlay
-from .poller import OBSPoller
-from .volume_meter import VolumeMeter
 from .auto_scene import AutoSceneSwitcher
 from .chapters import ChapterManager
 from .commands import CommandDispatcher
-from .web_remote import MobileServer, get_remote_url
+from .config import (
+    CONFIG_PATH,
+    DEFAULT_SCENE_COLOR,
+    DEFAULT_SCENE_ICON,
+    DISK_WARN_GB,
+    IDLE_BG,
+    LAYOUT_ZONES,
+    MIC_NAME,
+    SCENE_COLORS,
+    SCENE_ICONS,
+    SIZE_PRESETS,
+    reload_config,
+)
 from .ipc import IPCServer, check_legacy_cmd_file
-from .platform import IS_WAYLAND, HAS_XDOTOOL, get_font_family
+from .obs_client import obs_cmd, set_connection
+from .obs_connection import OBSConnection
+from .overlay import ReactionOverlay
+from .platform import IS_WAYLAND, get_font_family
+from .poller import OBSPoller
+from .state import OBSState, SignalBridge
+from .volume_meter import VolumeMeter
+from .web_remote import MobileServer, get_remote_url
 
 
 class IndicatorBar(QWidget):
@@ -300,16 +308,19 @@ class IndicatorBar(QWidget):
             gw = gw_base + 40
 
             g = QLinearGradient(0, 0, gw, 0)
-            g.setColorAt(0, rc); g.setColorAt(1, QColor(0, 0, 0, 0))
+            g.setColorAt(0, rc)
+            g.setColorAt(1, QColor(0, 0, 0, 0))
             p_obj.fillRect(0, 0, gw, h, QBrush(g))
 
             g = QLinearGradient(w - gw, 0, w, 0)
-            g.setColorAt(0, QColor(0, 0, 0, 0)); g.setColorAt(1, rc)
+            g.setColorAt(0, QColor(0, 0, 0, 0))
+            g.setColorAt(1, rc)
             p_obj.fillRect(w - gw, 0, gw, h, QBrush(g))
 
             sh = max(3, h // 3)
             g = QLinearGradient(0, h - sh, 0, h)
-            g.setColorAt(0, QColor(0, 0, 0, 0)); g.setColorAt(1, rc)
+            g.setColorAt(0, QColor(0, 0, 0, 0))
+            g.setColorAt(1, rc)
             p_obj.fillRect(0, h - sh, w, sh, QBrush(g))
 
         # State transition flash
@@ -320,7 +331,8 @@ class IndicatorBar(QWidget):
         # Top teal accent
         gd = min(h // 2, 14)
         g = QLinearGradient(0, 0, 0, gd)
-        g.setColorAt(0, QColor(0, 188, 212, 35)); g.setColorAt(1, QColor(0, 0, 0, 0))
+        g.setColorAt(0, QColor(0, 188, 212, 35))
+        g.setColorAt(1, QColor(0, 0, 0, 0))
         p_obj.fillRect(0, 0, w, gd, QBrush(g))
 
         # Bottom subtle border
@@ -364,7 +376,8 @@ class IndicatorBar(QWidget):
             p.setFont(sm)
             p.setPen(QColor("#4CAF50"))
             lx = z.x() + 6 + dr * 2 + 4
-            p.drawText(lx, 0, 50, h, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "MIC")
+            align = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+            p.drawText(lx, 0, 50, h, align, "MIC")
 
             # VU bar
             bx = lx + int(fs * 3.2)
@@ -378,7 +391,12 @@ class IndicatorBar(QWidget):
 
             lv = self.state.mic_level
             fw = int(bw * lv)
-            vc = QColor("#4CAF50") if lv < 0.55 else QColor("#FFC107") if lv < 0.80 else QColor("#f44336")
+            if lv < 0.55:
+                vc = QColor("#4CAF50")
+            elif lv < 0.80:
+                vc = QColor("#FFC107")
+            else:
+                vc = QColor("#f44336")
             p.setBrush(QBrush(vc))
             p.drawRoundedRect(bx, by, fw, bh, 2, 2)
 

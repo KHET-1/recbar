@@ -2,9 +2,49 @@
 
 Lightweight OBS recording companion bar for Linux.
 
+![CI](https://github.com/KHET-1/recbar/actions/workflows/ci.yml/badge.svg)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 ![Platform Linux](https://img.shields.io/badge/platform-linux-orange)
+
+## What It Looks Like
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ● REC  │ ● MIC ████████░░░░ │  🖥️  Desktop  │ 🖥️ 📷 📺 ⚡ │ 01:23:45 │ ● ⚙ ✕ │
+└──────────────────────────────────────────────────────────────────────────────┘
+  ↑ pulsing    ↑ real-time VU     ↑ scene name    ↑ buttons     ↑ timecode
+  rec dot      from OBS peaks     + waveform       click to      + hints
+                                   at large size   switch
+```
+
+Three size presets — **slim** (32px), **medium** (64px), **large** (128px with waveform):
+
+```
+Slim:    ┃● REC │ ● MIC ██░░ │ Desktop │ 🖥️📷📺 │ 01:23 │ ●⚙✕┃
+Medium:  ┃● REC  │ ● MIC █████░░░ │  🖥️ Desktop  │ 🖥️ 📷 📺 │ 01:23:45 │ ● ⚙ ✕┃
+Large:   ┃● REC   │ ● MIC ████████░░░░ │  🖥️  Desktop  ∿∿∿  │ 🖥️ 📷 📺 ⚡ │ 01:23:45 │ AUTO ● ⚙ ✕┃
+                                          ↑ waveform
+```
+
+Mobile remote (phone browser, zero install):
+
+```
+┌─────────────────────┐
+│   ⚡ RecBar Remote   │
+│  ● REC 01:23:45     │
+│                     │
+│  ⏺ REC  ⏸ PAUSE  🎤│
+│                     │
+│  🖥️ Desktop  📷 Cam │
+│  📺 Screen   ⚡ BRB │
+│                     │
+│  🔥 👍 ❤️ 🚀 💯 🎉  │
+│                     │
+│  [Chapter title___] │
+│  + Add Chapter      │
+└─────────────────────┘
+```
 
 ## What It Does
 
@@ -128,21 +168,30 @@ Edit `~/.config/recbar/config.json`:
 ## Architecture
 
 ```
-recbar/
-├── config.py          Config loading + constants
+recbar/                18 modules, 2,213 lines
+├── config.py          Config loading + hot-reload
 ├── state.py           Shared OBS state + signal bridge
+├── platform.py        X11/Wayland detection + font probing
 ├── obs_connection.py  Single persistent WebSocket with message routing
 ├── obs_client.py      Fire-and-forget command wrapper
 ├── ipc.py             Unix socket IPC server/client
+├── commands.py        Command dispatcher (extracted, testable)
 ├── poller.py          OBS status polling (shared connection)
 ├── volume_meter.py    Real-time mic levels (callback handler)
-├── auto_scene.py      Window-based scene switching (xdotool)
+├── auto_scene.py      Window-based scene switching (Wayland-aware)
 ├── chapters.py        Chapter marks + markdown export
-├── overlay.py         Reaction overlay + checklist (X11 click-through)
+├── overlay.py         Reaction overlay + checklist (Wayland-aware)
 ├── web_remote.py      Mobile HTTP remote + token auth
 ├── bar.py             Main indicator widget (8 paint helpers)
 ├── ctl.py             CLI control (Unix socket + file fallback)
 └── test_suite.py      Visual test suite
+
+tests/                 34 tests, 0.25s
+├── test_config.py     Config defaults, loading, presets
+├── test_chapters.py   Chapter marks + export
+├── test_ipc.py        Unix socket + 50-cmd stress test
+├── test_platform.py   X11/Wayland detection
+└── test_commands.py   Command dispatcher
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

@@ -1,10 +1,7 @@
 """Tests for recbar.chapters — chapter marks and markdown export."""
 
 import os
-import tempfile
 import time
-
-import pytest
 
 
 def test_add_chapter_not_recording():

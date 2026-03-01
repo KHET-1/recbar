@@ -10,7 +10,10 @@ from .obs_client import obs_cmd
 class CommandDispatcher:
     """Processes command strings from IPC, web remote, and keyboard shortcuts."""
 
-    def __init__(self, state, chapters, reaction_overlay, apply_size_fn, show_hint_fn, switch_scene_fn):
+    def __init__(
+        self, state, chapters, reaction_overlay,
+        apply_size_fn, show_hint_fn, switch_scene_fn,
+    ):
         self.state = state
         self.chapters = chapters
         self.overlay = reaction_overlay

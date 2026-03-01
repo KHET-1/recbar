@@ -7,8 +7,8 @@ Watch both the bar AND the checklist panel.
 Usage: recbar-test [--slow]
 """
 
-import time
 import sys
+import time
 
 CMD_FILE = "/tmp/recbar_cmd"
 SLOW = "--slow" in sys.argv

@@ -4,8 +4,6 @@ import json
 import os
 import tempfile
 
-import pytest
-
 
 def test_load_config_defaults():
     """Config returns sane defaults when no file exists."""

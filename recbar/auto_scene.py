@@ -8,12 +8,12 @@ warning at startup. Future: hyprctl/swaymsg support.
 """
 
 import subprocess
-import time
 import threading
+import time
 
-from .config import AUTO_SCENE_RULES, AUTO_SCENE_DEFAULT
+from .config import AUTO_SCENE_DEFAULT, AUTO_SCENE_RULES
 from .obs_client import obs_cmd
-from .platform import IS_WAYLAND, HAS_XDOTOOL
+from .platform import HAS_XDOTOOL, IS_WAYLAND
 
 
 class AutoSceneSwitcher(threading.Thread):

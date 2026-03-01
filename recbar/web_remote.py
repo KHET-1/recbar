@@ -10,12 +10,11 @@ Auto-refreshes status every 2 seconds via /status JSON endpoint.
 """
 
 import json
-import os
 import secrets
 import socket
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from .config import WEB_PORT
 from .ipc import send_command

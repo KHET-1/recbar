@@ -7,8 +7,8 @@ Usage:
     recbar --help       Show help
 """
 
-import sys
 import signal
+import sys
 
 from . import __version__
 
@@ -20,7 +20,7 @@ def main():
 
     if "--help" in sys.argv or "-h" in sys.argv:
         print(__doc__)
-        from .config import CONFIG_PATH, print_config_summary
+        from .config import print_config_summary
         print_config_summary()
         print()
         sys.exit(0)
@@ -38,8 +38,9 @@ def main():
         print("ERROR: websocket-client is required. Install with: pip install websocket-client")
         sys.exit(1)
 
-    from .config import CFG, CONFIG_PATH as CFG_PATH, print_config_summary
     from .bar import IndicatorBar
+    from .config import CFG, print_config_summary
+    from .config import CONFIG_PATH as CFG_PATH
 
     position = CFG["position"]
     if "--top" in sys.argv:
@@ -62,7 +63,7 @@ def main():
     bar.show()
 
     # Platform warnings
-    from .platform import IS_WAYLAND, HAS_XDOTOOL
+    from .platform import HAS_XDOTOOL, IS_WAYLAND
     if IS_WAYLAND:
         print("  Note:      Wayland detected — auto-scene and XShape click-through unavailable")
     elif not HAS_XDOTOOL:
