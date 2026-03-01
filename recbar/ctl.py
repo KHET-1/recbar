@@ -1,5 +1,7 @@
 """RecBar CLI control — send commands to a running RecBar instance.
 
+Uses Unix domain socket (primary) with file fallback (legacy).
+
 Usage:
     recbar-ctl size1|size2|size3          Resize bar
     recbar-ctl rec                        Toggle recording
@@ -20,9 +22,12 @@ Usage:
     recbar-ctl cl_clear                   Dismiss checklist
 """
 
+import os
+import socket
 import sys
 
-CMD_FILE = "/tmp/recbar_cmd"
+SOCK_PATH = "/tmp/recbar.sock"
+LEGACY_CMD_FILE = "/tmp/recbar_cmd"
 
 NAMED_REACTIONS = {
     "fire": "\U0001F525",
@@ -36,6 +41,28 @@ NAMED_REACTIONS = {
     "100": "\U0001F4AF",
     "bolt": "\u26A1",
 }
+
+
+def _send_unix(cmd):
+    """Send via Unix socket. Returns True on success."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(cmd.encode(), SOCK_PATH)
+        return True
+    except (ConnectionRefusedError, FileNotFoundError, OSError):
+        return False
+    finally:
+        sock.close()
+
+
+def _send_file(cmd):
+    """Fallback: write to legacy command file."""
+    try:
+        with open(LEGACY_CMD_FILE, "w") as f:
+            f.write(cmd)
+        return True
+    except OSError:
+        return False
 
 
 def main():
@@ -62,12 +89,11 @@ def main():
     elif cmd in ("cl_run", "cl_pass", "cl_fail") and len(sys.argv) >= 3:
         cmd = f"{cmd}:{sys.argv[2]}"
 
-    try:
-        with open(CMD_FILE, "w") as f:
-            f.write(cmd)
-    except OSError as e:
-        print(f"Error: could not write to {CMD_FILE}: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Try Unix socket first, fall back to file
+    if not _send_unix(cmd):
+        if not _send_file(cmd):
+            print("Error: RecBar is not running", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

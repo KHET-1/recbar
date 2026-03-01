@@ -23,19 +23,15 @@ from .config import (
     IDLE_BG, MIC_NAME, DISK_WARN_GB, WEB_PORT,
 )
 from .state import OBSState, SignalBridge
-from .obs_client import obs_cmd
+from .obs_client import obs_cmd, set_connection
+from .obs_connection import OBSConnection
 from .overlay import ReactionOverlay
 from .poller import OBSPoller
 from .volume_meter import VolumeMeter
 from .auto_scene import AutoSceneSwitcher
 from .chapters import ChapterManager
-from .web_remote import MobileServer, get_local_ip
-
-# Command file path (also used by recbar-ctl and web remote)
-CMD_FILE = "/tmp/recbar_cmd"
-
-# Legacy command file for backward compat with obs-bar-ctl
-LEGACY_CMD_FILE = "/tmp/obs_bar_cmd"
+from .web_remote import MobileServer, get_remote_url
+from .ipc import IPCServer, check_legacy_cmd_file
 
 
 class IndicatorBar(QWidget):
@@ -96,18 +92,26 @@ class IndicatorBar(QWidget):
         self.bridge = SignalBridge()
         self.bridge.updated.connect(self.update)
 
-        # Background threads
-        self.poller = OBSPoller(self.state, self.bridge, self.chapters)
-        self.poller.start()
+        # Unix socket IPC server
+        self.ipc = IPCServer()
+        self.ipc.start()
+
+        # Single shared OBS WebSocket connection
         self.volume_meter = VolumeMeter(self.state)
-        self.volume_meter.start()
+        self.obs_conn = OBSConnection(event_callback=self.volume_meter.on_event)
+        self.obs_conn.start()
+        set_connection(self.obs_conn)
+
+        # Background threads (poller uses shared connection)
+        self.poller = OBSPoller(self.state, self.bridge, self.chapters, self.obs_conn)
+        self.poller.start()
         self.auto_switcher = AutoSceneSwitcher(self.state)
         self.auto_switcher.start()
         self.web_server = MobileServer(self.state, self.chapters)
         self.web_server.start()
 
-        ip = get_local_ip()
-        print(f"  Remote:    http://{ip}:{WEB_PORT}")
+        remote_url = get_remote_url()
+        print(f"  Remote:    {remote_url}")
 
     # ── Layout ─────────────────────────────────────────────
 
@@ -204,16 +208,15 @@ class IndicatorBar(QWidget):
     # ── External Command Ingestion ─────────────────────────
 
     def _check_commands(self):
-        """Poll the command file for incoming commands from CLI/remote."""
-        for cmd_file in (CMD_FILE, LEGACY_CMD_FILE):
-            try:
-                with open(cmd_file, "r") as f:
-                    cmd = f.read().strip()
-                if cmd:
-                    open(cmd_file, "w").close()
-                    self._handle_cmd(cmd)
-            except FileNotFoundError:
-                pass
+        """Receive commands from Unix socket IPC (+ legacy file fallback)."""
+        # Primary: Unix socket (reliable, ordered, no message loss)
+        for cmd in self.ipc.recv_all():
+            self._handle_cmd(cmd)
+
+        # Legacy: file-based fallback for old obs-bar-ctl users
+        legacy = check_legacy_cmd_file()
+        if legacy:
+            self._handle_cmd(legacy)
 
     def _handle_cmd(self, cmd):
         """Process a single command string."""
@@ -279,7 +282,7 @@ class IndicatorBar(QWidget):
         self.update()
 
     # ══════════════════════════════════════════════════════
-    # PAINT — all rendering happens here
+    # PAINT — orchestrator calls zone helpers
     # ══════════════════════════════════════════════════════
 
     def paintEvent(self, event):
@@ -296,146 +299,144 @@ class IndicatorBar(QWidget):
         sm = QFont("JetBrains Mono", max(7, fs - 2), QFont.Weight.Bold)
         sm.setStyleHint(QFont.StyleHint.Monospace)
 
-        # ── Background ─────────────────────────────────────
-        painter.fillRect(0, 0, w, h, QColor(IDLE_BG))
+        self._draw_background(painter, w, h, gw_base)
+        self._draw_rec_zone(painter, zones["rec"], font, h)
+        self._draw_mic_zone(painter, zones["mic"], sm, fs, h)
+        self._draw_scene_name(painter, zones["scene"], font, h)
+        self._draw_scene_buttons(painter, zones["scenes"], h)
+        self._draw_time_zone(painter, zones["time"], font, fs, h)
+        self._draw_controls(painter, zones["ctrl"], sm, fs, h)
+        self._draw_rec_dot(painter, zones["rec"], h)
+
+        painter.end()
+
+    # ── Paint Helpers ──────────────────────────────────────
+
+    def _draw_background(self, p, w, h, gw_base):
+        """Background fill, recording glow, flash, teal accent, border."""
+        p_obj = p  # avoid shadowing
+
+        p_obj.fillRect(0, 0, w, h, QColor(IDLE_BG))
 
         if not self.state.connected:
-            painter.fillRect(0, 0, w, h, QColor("#0d0d0d"))
+            p_obj.fillRect(0, 0, w, h, QColor("#0d0d0d"))
         elif self.state.recording:
-            p = 0.5 + 0.5 * math.sin(self.pulse_phase)
+            pulse = 0.5 + 0.5 * math.sin(self.pulse_phase)
             if self.state.paused:
-                rc = QColor(255, 193, 7, int(120 + 80 * p))
+                rc = QColor(255, 193, 7, int(120 + 80 * pulse))
             else:
-                rc = QColor(211, 47, 47, int(140 + 100 * p))
+                rc = QColor(211, 47, 47, int(140 + 100 * pulse))
             gw = gw_base + 40
 
-            # Left glow
             g = QLinearGradient(0, 0, gw, 0)
             g.setColorAt(0, rc); g.setColorAt(1, QColor(0, 0, 0, 0))
-            painter.fillRect(0, 0, gw, h, QBrush(g))
+            p_obj.fillRect(0, 0, gw, h, QBrush(g))
 
-            # Right glow
             g = QLinearGradient(w - gw, 0, w, 0)
             g.setColorAt(0, QColor(0, 0, 0, 0)); g.setColorAt(1, rc)
-            painter.fillRect(w - gw, 0, gw, h, QBrush(g))
+            p_obj.fillRect(w - gw, 0, gw, h, QBrush(g))
 
-            # Bottom glow
             sh = max(3, h // 3)
             g = QLinearGradient(0, h - sh, 0, h)
             g.setColorAt(0, QColor(0, 0, 0, 0)); g.setColorAt(1, rc)
-            painter.fillRect(0, h - sh, w, sh, QBrush(g))
+            p_obj.fillRect(0, h - sh, w, sh, QBrush(g))
 
-        # State transition flash (brief white flash when rec starts/stops)
+        # State transition flash
         if time.time() < self._flash_until:
             flash_alpha = int(80 * (self._flash_until - time.time()) / 0.4)
-            painter.fillRect(0, 0, w, h, QColor(255, 255, 255, flash_alpha))
+            p_obj.fillRect(0, 0, w, h, QColor(255, 255, 255, flash_alpha))
 
-        # Top teal accent line
+        # Top teal accent
         gd = min(h // 2, 14)
         g = QLinearGradient(0, 0, 0, gd)
         g.setColorAt(0, QColor(0, 188, 212, 35)); g.setColorAt(1, QColor(0, 0, 0, 0))
-        painter.fillRect(0, 0, w, gd, QBrush(g))
+        p_obj.fillRect(0, 0, w, gd, QBrush(g))
 
         # Bottom subtle border
-        painter.setPen(QColor(0, 188, 212, 18))
+        p_obj.setPen(QColor(0, 188, 212, 18))
         if self.position == "bottom":
-            painter.drawLine(0, 0, w, 0)
+            p_obj.drawLine(0, 0, w, 0)
         else:
-            painter.drawLine(0, h - 1, w, h - 1)
+            p_obj.drawLine(0, h - 1, w, h - 1)
 
-        # ── REC Zone ───────────────────────────────────────
-        z = zones["rec"]
-        painter.setFont(font)
+    def _draw_rec_zone(self, p, z, font, h):
+        """REC zone text: OFFLINE / REC / PAUSED / IDLE."""
+        p.setFont(font)
         if not self.state.connected:
-            painter.setPen(QColor("#444455"))
-            painter.drawText(z.adjusted(8, 0, 0, 0),
-                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                             "OFFLINE")
+            p.setPen(QColor("#444455"))
+            p.drawText(z.adjusted(8, 0, 0, 0),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       "OFFLINE")
         elif self.state.recording:
             tx = z.x() + max(20, h // 2 + 8)
             tr = QRect(tx, 0, z.width() - (tx - z.x()), h)
             if self.state.paused:
-                painter.setPen(QColor("#FFC107"))
-                painter.drawText(tr,
-                                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                                 "PAUSED")
+                p.setPen(QColor("#FFC107"))
+                p.drawText(tr, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "PAUSED")
             else:
-                painter.setPen(QColor("#ffffff"))
-                painter.drawText(tr,
-                                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                                 "REC")
+                p.setPen(QColor("#ffffff"))
+                p.drawText(tr, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "REC")
         else:
-            painter.setPen(QColor("#555566"))
-            painter.drawText(z.adjusted(8, 0, 0, 0),
-                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                             "IDLE")
+            p.setPen(QColor("#555566"))
+            p.drawText(z.adjusted(8, 0, 0, 0),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "IDLE")
 
-        # ── MIC Zone (clickable) ───────────────────────────
-        z = zones["mic"]
+    def _draw_mic_zone(self, p, z, sm, fs, h):
+        """MIC zone: green dot + VU bar when active, muted icon when off."""
         self._click_zones["mic"] = z
         if self.state.mic_active:
             dr = max(3, h // 8)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor("#4CAF50")))
-            painter.drawEllipse(z.x() + 6, h // 2 - dr, dr * 2, dr * 2)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(QColor("#4CAF50")))
+            p.drawEllipse(z.x() + 6, h // 2 - dr, dr * 2, dr * 2)
 
-            painter.setFont(sm)
-            painter.setPen(QColor("#4CAF50"))
+            p.setFont(sm)
+            p.setPen(QColor("#4CAF50"))
             lx = z.x() + 6 + dr * 2 + 4
-            painter.drawText(lx, 0, 50, h,
-                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                             "MIC")
+            p.drawText(lx, 0, 50, h, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "MIC")
 
-            # VU bar with real levels
+            # VU bar
             bx = lx + int(fs * 3.2)
             bw = max(30, z.right() - bx - 8)
             bh = max(4, h // 5)
             by = (h - bh) // 2
 
-            # Background
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(35, 35, 55)))
-            painter.drawRoundedRect(bx, by, bw, bh, 2, 2)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(QColor(35, 35, 55)))
+            p.drawRoundedRect(bx, by, bw, bh, 2, 2)
 
-            # Fill with color thresholds
             lv = self.state.mic_level
             fw = int(bw * lv)
-            if lv < 0.55:
-                vc = QColor("#4CAF50")
-            elif lv < 0.80:
-                vc = QColor("#FFC107")
-            else:
-                vc = QColor("#f44336")
-            painter.setBrush(QBrush(vc))
-            painter.drawRoundedRect(bx, by, fw, bh, 2, 2)
+            vc = QColor("#4CAF50") if lv < 0.55 else QColor("#FFC107") if lv < 0.80 else QColor("#f44336")
+            p.setBrush(QBrush(vc))
+            p.drawRoundedRect(bx, by, fw, bh, 2, 2)
 
-            # Segmentation lines
-            painter.setPen(QColor(26, 26, 46, 160))
+            p.setPen(QColor(26, 26, 46, 160))
             segs = max(5, bw // 8)
             for i in range(1, segs):
                 sx = bx + i * bw // segs
                 if sx < bx + fw:
-                    painter.drawLine(sx, by + 1, sx, by + bh - 1)
+                    p.drawLine(sx, by + 1, sx, by + bh - 1)
         else:
-            painter.setFont(sm)
-            painter.setPen(QColor("#555566"))
-            painter.drawText(z.adjusted(6, 0, -4, 0),
-                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                             "\U0001F507 OFF")
+            p.setFont(sm)
+            p.setPen(QColor("#555566"))
+            p.drawText(z.adjusted(6, 0, -4, 0),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       "\U0001F507 OFF")
 
-        # ── Scene Name Zone ────────────────────────────────
-        z = zones["scene"]
-        painter.setFont(font)
+    def _draw_scene_name(self, p, z, font, h):
+        """Scene name with icon + waveform at size3."""
+        p.setFont(font)
         sc = QColor(SCENE_COLORS.get(self.state.scene, DEFAULT_SCENE_COLOR))
-        painter.setPen(sc)
+        p.setPen(sc)
         icon = SCENE_ICONS.get(self.state.scene, DEFAULT_SCENE_ICON)
-        painter.drawText(z, Qt.AlignmentFlag.AlignCenter, f"{icon}  {self.state.scene}")
+        p.drawText(z, Qt.AlignmentFlag.AlignCenter, f"{icon}  {self.state.scene}")
 
-        # Waveform at size3 — mirrored waveform behind scene text
+        # Waveform at size3
         if self.current_size == 3 and len(self.state.mic_history) > 4:
             pts = list(self.state.mic_history)
             step = max(1, z.width() // len(pts))
-            painter.setPen(QPen(QColor(0, 188, 212, 60), 1))
+            p.setPen(QPen(QColor(0, 188, 212, 60), 1))
             wave_amp = h * 0.35
             mid = h // 2
             for i in range(1, len(pts)):
@@ -445,171 +446,168 @@ class IndicatorBar(QWidget):
                     break
                 d1 = int(pts[i - 1] * wave_amp)
                 d2 = int(pts[i] * wave_amp)
-                painter.drawLine(x1, mid - d1, x2, mid - d2)  # top half
-                painter.drawLine(x1, mid + d1, x2, mid + d2)  # mirror
+                p.drawLine(x1, mid - d1, x2, mid - d2)
+                p.drawLine(x1, mid + d1, x2, mid + d2)
 
-        # ── Scene Buttons ──────────────────────────────────
-        z = zones["scenes"]
+    def _draw_scene_buttons(self, p, z, h):
+        """Clickable scene buttons with emoji icons."""
         scenes = self.state.scenes
-        if scenes:
-            pad = 3
-            bh_ = max(16, h - 8)
-            by_ = (h - bh_) // 2
-            mbw = min(int((z.width() - pad * (len(scenes) + 1)) / max(1, len(scenes))), 72)
-            total = len(scenes) * (mbw + pad) - pad
-            sx = z.x() + (z.width() - total) // 2
+        if not scenes:
+            return
 
-            for i, sn in enumerate(scenes):
-                bx_ = sx + i * (mbw + pad)
-                br = QRect(bx_, by_, mbw, bh_)
-                self._click_zones[f"sbtn:{sn}"] = br
-                active = sn == self.state.scene
+        pad = 3
+        bh_ = max(16, h - 8)
+        by_ = (h - bh_) // 2
+        mbw = min(int((z.width() - pad * (len(scenes) + 1)) / max(1, len(scenes))), 72)
+        total = len(scenes) * (mbw + pad) - pad
+        sx = z.x() + (z.width() - total) // 2
 
-                scolor = QColor(SCENE_COLORS.get(sn, DEFAULT_SCENE_COLOR))
-                painter.setPen(Qt.PenStyle.NoPen)
-                if active:
-                    scolor.setAlpha(90)
-                    painter.setBrush(QBrush(scolor))
-                else:
-                    painter.setBrush(QBrush(QColor(28, 28, 48, 200)))
-                painter.drawRoundedRect(br, 4, 4)
+        for i, sn in enumerate(scenes):
+            bx_ = sx + i * (mbw + pad)
+            br = QRect(bx_, by_, mbw, bh_)
+            self._click_zones[f"sbtn:{sn}"] = br
+            active = sn == self.state.scene
 
-                # Border
-                bc = QColor(SCENE_COLORS.get(sn, DEFAULT_SCENE_COLOR))
-                bc.setAlpha(140 if active else 40)
-                painter.setPen(bc)
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawRoundedRect(br, 4, 4)
+            scolor = QColor(SCENE_COLORS.get(sn, DEFAULT_SCENE_COLOR))
+            p.setPen(Qt.PenStyle.NoPen)
+            if active:
+                scolor.setAlpha(90)
+                p.setBrush(QBrush(scolor))
+            else:
+                p.setBrush(QBrush(QColor(28, 28, 48, 200)))
+            p.drawRoundedRect(br, 4, 4)
 
-                # Icon
-                ef = QFont("Noto Color Emoji", max(8, bh_ // 2 - 2))
-                painter.setFont(ef)
-                painter.setPen(QColor("#ffffff"))
-                painter.drawText(br, Qt.AlignmentFlag.AlignCenter,
-                                 SCENE_ICONS.get(sn, DEFAULT_SCENE_ICON))
+            bc = QColor(SCENE_COLORS.get(sn, DEFAULT_SCENE_COLOR))
+            bc.setAlpha(140 if active else 40)
+            p.setPen(bc)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(br, 4, 4)
 
-        # ── Time Zone ──────────────────────────────────────
-        z = zones["time"]
-        painter.setFont(font)
+            ef = QFont("Noto Color Emoji", max(8, bh_ // 2 - 2))
+            p.setFont(ef)
+            p.setPen(QColor("#ffffff"))
+            p.drawText(br, Qt.AlignmentFlag.AlignCenter,
+                       SCENE_ICONS.get(sn, DEFAULT_SCENE_ICON))
+
+    def _draw_time_zone(self, p, z, font, fs, h):
+        """Recording timecode + hint text overlay."""
+        p.setFont(font)
         if self.state.recording:
-            painter.setPen(QColor("#ffffff"))
-            painter.drawText(z, Qt.AlignmentFlag.AlignCenter, self.state.rec_time)
+            p.setPen(QColor("#ffffff"))
+            p.drawText(z, Qt.AlignmentFlag.AlignCenter, self.state.rec_time)
 
-        # Hint overlay
         if self._hint_text and time.time() < self._hint_until:
             alpha = min(1.0, (self._hint_until - time.time()) / 0.3)
-            painter.setFont(QFont("JetBrains Mono", max(8, fs - 4)))
-            painter.setPen(QColor(136, 136, 136, int(255 * alpha)))
-            painter.drawText(z.adjusted(0, 0, -8, 0),
-                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                             self._hint_text)
+            p.setFont(QFont("JetBrains Mono", max(8, fs - 4)))
+            p.setPen(QColor(136, 136, 136, int(255 * alpha)))
+            p.drawText(z.adjusted(0, 0, -8, 0),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       self._hint_text)
 
-        # ── Controls Zone ──────────────────────────────────
-        z = zones["ctrl"]
+    def _draw_controls(self, p, z, sm, fs, h):
+        """Controls zone: connection dot, disk warning, auto-scene, gear, close."""
         bw_ = max(22, h)
 
         # Connection status dot
         cd = max(3, h // 10)
-        painter.setPen(Qt.PenStyle.NoPen)
+        p.setPen(Qt.PenStyle.NoPen)
         if self.state.connected:
-            painter.setBrush(QBrush(QColor(76, 175, 80, 140)))
+            p.setBrush(QBrush(QColor(76, 175, 80, 140)))
         else:
             p_dot = 0.5 + 0.5 * math.sin(self.pulse_phase * 2)
-            painter.setBrush(QBrush(QColor(244, 67, 54, int(100 + 100 * p_dot))))
-        painter.drawEllipse(z.x() + 3, h // 2 - cd, cd * 2, cd * 2)
+            p.setBrush(QBrush(QColor(244, 67, 54, int(100 + 100 * p_dot))))
+        p.drawEllipse(z.x() + 3, h // 2 - cd, cd * 2, cd * 2)
 
         # Disk warning
         if 0 < self.state.disk_free_gb < DISK_WARN_GB:
-            painter.setFont(sm)
-            painter.setPen(QColor("#f44336"))
-            painter.drawText(z.adjusted(4, 0, 0, 0),
-                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                             f"\u26A0 {self.state.disk_free_gb:.0f}GB")
+            p.setFont(sm)
+            p.setPen(QColor("#f44336"))
+            p.drawText(z.adjusted(4, 0, 0, 0),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       f"\u26A0 {self.state.disk_free_gb:.0f}GB")
 
         # Auto-scene indicator
         if self.state.auto_scene_enabled:
-            painter.setFont(QFont("JetBrains Mono", max(6, fs - 4)))
-            painter.setPen(QColor("#4CAF50"))
-            painter.drawText(z.adjusted(4, 0, -bw_ * 2 - 10, 0),
-                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
-                             "AUTO")
+            p.setFont(QFont("JetBrains Mono", max(6, fs - 4)))
+            p.setPen(QColor("#4CAF50"))
+            p.drawText(z.adjusted(4, 0, -bw_ * 2 - 10, 0),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, "AUTO")
 
         # Settings gear
         gr = QRect(z.right() - bw_ * 2 - 6, 0, bw_, h)
         self._click_zones["settings"] = gr
-        painter.setFont(QFont("JetBrains Mono", max(9, fs)))
-        painter.setPen(QColor("#556677"))
-        painter.drawText(gr, Qt.AlignmentFlag.AlignCenter, "\u2699")
+        p.setFont(QFont("JetBrains Mono", max(9, fs)))
+        p.setPen(QColor("#556677"))
+        p.drawText(gr, Qt.AlignmentFlag.AlignCenter, "\u2699")
 
         # Close X
         cr = QRect(z.right() - bw_ - 2, 0, bw_, h)
         self._click_zones["close"] = cr
-        painter.setPen(QColor("#556677"))
-        painter.drawText(cr, Qt.AlignmentFlag.AlignCenter, "\u2715")
+        p.setPen(QColor("#556677"))
+        p.drawText(cr, Qt.AlignmentFlag.AlignCenter, "\u2715")
 
-        # ── REC Dot — drawn LAST to pop above everything ──
-        rz = zones["rec"]
+    def _draw_rec_dot(self, p, rz, h):
+        """REC dot — drawn LAST to pop above everything.
+
+        Active recording: dark halo -> glow rings -> red core -> white pip -> progress ring.
+        Paused: dark halo -> amber dot.
+        """
         if self.state.recording and not self.state.paused:
-            p = 0.4 + 0.6 * (0.5 + 0.5 * math.sin(self.pulse_phase * 1.5))
+            pulse = 0.4 + 0.6 * (0.5 + 0.5 * math.sin(self.pulse_phase * 1.5))
             dr = max(5, h // 5)
             dx = rz.x() + 6 + dr
             dy = h // 2
 
-            painter.setPen(Qt.PenStyle.NoPen)
+            p.setPen(Qt.PenStyle.NoPen)
 
-            # Dark halo for contrast
-            painter.setBrush(QBrush(QColor(0, 0, 0, 210)))
-            painter.drawEllipse(dx - dr - 4, dy - dr - 4, (dr + 4) * 2, (dr + 4) * 2)
+            # Dark halo
+            p.setBrush(QBrush(QColor(0, 0, 0, 210)))
+            p.drawEllipse(dx - dr - 4, dy - dr - 4, (dr + 4) * 2, (dr + 4) * 2)
 
             # Glow rings
             for i in range(3, 0, -1):
-                painter.setBrush(QBrush(QColor(255, 30, 30, int(70 * p * i / 3))))
-                painter.drawEllipse(dx - dr * i, dy - dr * i, dr * 2 * i, dr * 2 * i)
+                p.setBrush(QBrush(QColor(255, 30, 30, int(70 * pulse * i / 3))))
+                p.drawEllipse(dx - dr * i, dy - dr * i, dr * 2 * i, dr * 2 * i)
 
             # Red core
-            painter.setBrush(QBrush(QColor(255, 40, 40, int(220 + 35 * p))))
-            painter.drawEllipse(dx - dr, dy - dr, dr * 2, dr * 2)
+            p.setBrush(QBrush(QColor(255, 40, 40, int(220 + 35 * pulse))))
+            p.drawEllipse(dx - dr, dy - dr, dr * 2, dr * 2)
 
             # White-hot center pip
             pr_ = max(2, dr // 3)
-            painter.setBrush(QBrush(QColor(255, 220, 220, int(200 + 55 * p))))
-            painter.drawEllipse(dx - pr_, dy - pr_, pr_ * 2, pr_ * 2)
+            p.setBrush(QBrush(QColor(255, 220, 220, int(200 + 55 * pulse))))
+            p.drawEllipse(dx - pr_, dy - pr_, pr_ * 2, pr_ * 2)
 
-            # Progress ring (if target duration set)
+            # Progress ring
             if self.state.target_duration > 0 and self.state.rec_start_time > 0:
                 elapsed = time.time() - self.state.rec_start_time
                 progress = min(1.0, elapsed / (self.state.target_duration * 60))
                 ring_r = dr + 6
                 span = int(progress * 360 * 16)
-                if progress < 0.7:
-                    ring_c = QColor("#4CAF50")
-                elif progress < 0.9:
-                    ring_c = QColor("#FFC107")
-                else:
-                    ring_c = QColor("#f44336")
-                painter.setPen(QPen(ring_c, max(2, h // 16)))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawArc(dx - ring_r, dy - ring_r, ring_r * 2, ring_r * 2,
-                                90 * 16, -span)
+                ring_c = (QColor("#4CAF50") if progress < 0.7
+                          else QColor("#FFC107") if progress < 0.9
+                          else QColor("#f44336"))
+                p.setPen(QPen(ring_c, max(2, h // 16)))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawArc(dx - ring_r, dy - ring_r, ring_r * 2, ring_r * 2, 90 * 16, -span)
 
         elif self.state.recording and self.state.paused:
-            p = 0.5 + 0.5 * math.sin(self.pulse_phase * 0.8)
+            pulse = 0.5 + 0.5 * math.sin(self.pulse_phase * 0.8)
             dr = max(5, h // 5)
             dx = rz.x() + 6 + dr
             dy = h // 2
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(0, 0, 0, 200)))
-            painter.drawEllipse(dx - dr - 3, dy - dr - 3, (dr + 3) * 2, (dr + 3) * 2)
-            painter.setBrush(QBrush(QColor(255, 193, 7, int(180 + 75 * p))))
-            painter.drawEllipse(dx - dr, dy - dr, dr * 2, dr * 2)
-
-        painter.end()
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(QColor(0, 0, 0, 200)))
+            p.drawEllipse(dx - dr - 3, dy - dr - 3, (dr + 3) * 2, (dr + 3) * 2)
+            p.setBrush(QBrush(QColor(255, 193, 7, int(180 + 75 * pulse))))
+            p.drawEllipse(dx - dr, dy - dr, dr * 2, dr * 2)
 
     # ── Cleanup ────────────────────────────────────────────
 
     def closeEvent(self, event):
         self.poller.running = False
-        self.volume_meter.running = False
+        self.obs_conn.stop()
+        self.ipc.stop()
         self.anim_timer.stop()
         self.reaction_overlay.close()
         event.accept()

@@ -1,68 +1,38 @@
 """Real-time mic volume meter via OBS InputVolumeMeters events.
 
-Subscribes to OBS WebSocket event stream (eventSubscriptions: 1 << 16)
-and updates OBSState.mic_level + mic_history with actual peak values.
+No longer a separate thread with its own WebSocket connection.
+Now just a callback handler registered with the shared OBSConnection.
+The connection's reader thread calls on_event() when volume data arrives.
 """
 
-import json
-import threading
-import time
-
-try:
-    import websocket
-except ImportError:
-    websocket = None
-
-from .config import OBS_URL, MIC_NAME
+from .config import MIC_NAME
 
 
-class VolumeMeter(threading.Thread):
-    """Background thread that reads real-time mic levels from OBS.
+class VolumeMeter:
+    """Processes InputVolumeMeters events from the shared OBS connection.
 
-    Uses a dedicated WebSocket connection subscribed only to
-    InputVolumeMeters events (high-frequency, ~50ms intervals).
+    Register this as the event_callback on OBSConnection. It filters for
+    the configured mic input and updates state.mic_level + mic_history.
     """
 
     def __init__(self, state):
-        super().__init__(daemon=True)
         self.state = state
-        self.running = True
 
-    def run(self):
-        if websocket is None:
+    def on_event(self, event_data):
+        """Called by OBSConnection reader thread for every OBS event.
+
+        Filters for InputVolumeMeters and extracts peak level for
+        the configured mic input.
+        """
+        if event_data.get("eventType") != "InputVolumeMeters":
             return
 
-        while self.running:
-            try:
-                ws = websocket.create_connection(OBS_URL, timeout=5)
-                json.loads(ws.recv())  # Hello
-
-                # Subscribe to InputVolumeMeters only (1 << 16 = 65536)
-                ws.send(json.dumps({
-                    "op": 1,
-                    "d": {"rpcVersion": 1, "eventSubscriptions": 65536}
-                }))
-                ws.recv()  # Identified
-
-                while self.running:
-                    msg = json.loads(ws.recv())
-                    if msg.get("op") != 5:  # Only care about Event messages
-                        continue
-
-                    d = msg.get("d", {})
-                    if d.get("eventType") != "InputVolumeMeters":
-                        continue
-
-                    for inp in d.get("eventData", {}).get("inputs", []):
-                        if inp.get("inputName") != MIC_NAME:
-                            continue
-                        levels = inp.get("inputLevelsMul", [[0, 0, 0]])
-                        if levels and levels[0]:
-                            # [magnitude, peak, inputPeak] — use peak
-                            peak = levels[0][1] if len(levels[0]) > 1 else levels[0][0]
-                            self.state.mic_level = max(0.0, min(1.0, float(peak)))
-                            self.state.mic_history.append(self.state.mic_level)
-
-            except Exception:
-                self.state.mic_level = 0.0
-                time.sleep(2)
+        for inp in event_data.get("eventData", {}).get("inputs", []):
+            if inp.get("inputName") != MIC_NAME:
+                continue
+            levels = inp.get("inputLevelsMul", [[0, 0, 0]])
+            if levels and levels[0]:
+                # [magnitude, peak, inputPeak] — use peak
+                peak = levels[0][1] if len(levels[0]) > 1 else levels[0][0]
+                self.state.mic_level = max(0.0, min(1.0, float(peak)))
+                self.state.mic_history.append(self.state.mic_level)
