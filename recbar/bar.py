@@ -367,6 +367,8 @@ class IndicatorBar(QWidget):
     def _draw_mic_zone(self, p, z, sm, fs, h):
         """MIC zone: green dot + VU bar when active, muted icon when off."""
         self._click_zones["mic"] = z
+        if not self.state.connected:
+            return  # Don't show mic status when OBS isn't connected
         if self.state.mic_active:
             dr = max(3, h // 8)
             p.setPen(Qt.PenStyle.NoPen)
@@ -415,6 +417,12 @@ class IndicatorBar(QWidget):
 
     def _draw_scene_name(self, p, z, font, h):
         """Scene name with icon + waveform at size3."""
+        if not self.state.connected:
+            p.setFont(font)
+            p.setPen(QColor("#444455"))
+            p.drawText(z, Qt.AlignmentFlag.AlignCenter, "Waiting for OBS\u2026")
+            return
+
         # Waveform behind text (size3 only)
         if self.current_size == 3 and len(self.state.mic_history) > 4:
             pts = list(self.state.mic_history)
@@ -504,7 +512,7 @@ class IndicatorBar(QWidget):
             p.setBrush(QBrush(QColor(76, 175, 80, 140)))
         else:
             p_dot = 0.5 + 0.5 * math.sin(self.pulse_phase * 2)
-            p.setBrush(QBrush(QColor(244, 67, 54, int(100 + 100 * p_dot))))
+            p.setBrush(QBrush(QColor(100, 100, 120, int(60 + 80 * p_dot))))
         p.drawEllipse(z.x() + 3, h // 2 - cd, cd * 2, cd * 2)
 
         # Disk warning
