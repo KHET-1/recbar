@@ -38,7 +38,7 @@ def main():
         print("ERROR: websocket-client is required. Install with: pip install websocket-client")
         sys.exit(1)
 
-    from .config import CFG, print_config_summary
+    from .config import CFG, CONFIG_PATH as CFG_PATH, print_config_summary
     from .bar import IndicatorBar
 
     position = CFG["position"]
@@ -61,8 +61,16 @@ def main():
     bar = IndicatorBar(position)
     bar.show()
 
+    # Platform warnings
+    from .platform import IS_WAYLAND, HAS_XDOTOOL
+    if IS_WAYLAND:
+        print("  Note:      Wayland detected — auto-scene and XShape click-through unavailable")
+    elif not HAS_XDOTOOL:
+        print("  Note:      xdotool not found — auto-scene switching disabled")
+
     print()
     print("  Ready. Press Ctrl+Q on bar to quit.")
+    print(f"  Config hot-reload: edit {CFG_PATH} and changes apply instantly.")
     print()
 
     sys.exit(app.exec())

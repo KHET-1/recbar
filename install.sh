@@ -66,7 +66,7 @@ if [ -f "$DESKTOP_SRC" ]; then
     cp "$DESKTOP_SRC" "$APPS_DIR/recbar.desktop"
     echo "  Desktop entry: $APPS_DIR/recbar.desktop"
 
-    if [ "$1" = "--autostart" ] || [ "$2" = "--autostart" ]; then
+    if [[ "$*" == *"--autostart"* ]]; then
         AUTOSTART_DIR="$HOME/.config/autostart"
         mkdir -p "$AUTOSTART_DIR"
         cp "$DESKTOP_SRC" "$AUTOSTART_DIR/recbar.desktop"
@@ -74,6 +74,18 @@ if [ -f "$DESKTOP_SRC" ]; then
     else
         echo "  Tip: ./install.sh --autostart to launch RecBar on login"
     fi
+fi
+
+# Install systemd user service (optional)
+SERVICE_SRC="$SCRIPT_DIR/recbar.service"
+if [ -f "$SERVICE_SRC" ] && [[ "$*" == *"--systemd"* ]]; then
+    SYSTEMD_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SYSTEMD_DIR"
+    cp "$SERVICE_SRC" "$SYSTEMD_DIR/recbar.service"
+    systemctl --user daemon-reload
+    systemctl --user enable recbar.service
+    echo "  Systemd:   $SYSTEMD_DIR/recbar.service (enabled)"
+    echo "  Start:     systemctl --user start recbar"
 fi
 
 echo ""

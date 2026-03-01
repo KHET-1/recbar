@@ -18,9 +18,9 @@ from PyQt6.QtCore import Qt, QTimer, QRect
 from PyQt6.QtGui import QFont, QPainter, QColor, QLinearGradient, QBrush, QPen
 
 from .config import (
-    CFG, SIZE_PRESETS, LAYOUT_ZONES,
+    CFG, CONFIG_PATH, SIZE_PRESETS, LAYOUT_ZONES,
     SCENE_COLORS, SCENE_ICONS, DEFAULT_SCENE_COLOR, DEFAULT_SCENE_ICON,
-    IDLE_BG, MIC_NAME, DISK_WARN_GB, WEB_PORT,
+    IDLE_BG, MIC_NAME, DISK_WARN_GB, WEB_PORT, reload_config,
 )
 from .state import OBSState, SignalBridge
 from .obs_client import obs_cmd, set_connection
@@ -30,8 +30,10 @@ from .poller import OBSPoller
 from .volume_meter import VolumeMeter
 from .auto_scene import AutoSceneSwitcher
 from .chapters import ChapterManager
+from .commands import CommandDispatcher
 from .web_remote import MobileServer, get_remote_url
 from .ipc import IPCServer, check_legacy_cmd_file
+from .platform import IS_WAYLAND, HAS_XDOTOOL, get_font_family
 
 
 class IndicatorBar(QWidget):
@@ -63,13 +65,18 @@ class IndicatorBar(QWidget):
         self._last_rec_state = False  # for flash effect on state transition
         self._flash_until = 0.0
 
-        # Window flags: frameless, always-on-top, tool (no taskbar), X11 bypass
-        self.setWindowFlags(
+        # Font detection (run once, cache results)
+        self._mono_font, self._emoji_font = get_font_family()
+
+        # Window flags: frameless, always-on-top, tool (no taskbar)
+        flags = (
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
-            | Qt.WindowType.X11BypassWindowManagerHint
         )
+        if not IS_WAYLAND:
+            flags |= Qt.WindowType.X11BypassWindowManagerHint
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -82,6 +89,12 @@ class IndicatorBar(QWidget):
         self.reaction_overlay.show()
 
         self._apply_size(1)
+
+        # Command dispatcher (handles IPC/keyboard commands)
+        self.dispatcher = CommandDispatcher(
+            self.state, self.chapters, self.reaction_overlay,
+            self._apply_size, self._show_hint, self._switch_scene,
+        )
 
         # Animation timer (30fps)
         self.anim_timer = QTimer()
@@ -112,6 +125,23 @@ class IndicatorBar(QWidget):
 
         remote_url = get_remote_url()
         print(f"  Remote:    {remote_url}")
+
+        # Config hot-reload via QFileSystemWatcher
+        from PyQt6.QtCore import QFileSystemWatcher
+        self._config_watcher = QFileSystemWatcher()
+        if CONFIG_PATH:
+            self._config_watcher.addPath(CONFIG_PATH)
+            self._config_watcher.fileChanged.connect(self._on_config_changed)
+
+    def _on_config_changed(self, path):
+        """Reload config when config.json changes on disk."""
+        if reload_config():
+            self._show_hint("Config reloaded")
+            # Re-add watch (some editors replace file, which removes the watch)
+            if path not in self._config_watcher.files():
+                self._config_watcher.addPath(path)
+        else:
+            self._show_hint("Config error")
 
     # ── Layout ─────────────────────────────────────────────
 
@@ -184,24 +214,17 @@ class IndicatorBar(QWidget):
         m = event.modifiers()
         ctrl = bool(m & Qt.KeyboardModifier.ControlModifier)
 
-        if ctrl and k == Qt.Key.Key_1:
-            self._apply_size(1); self._show_hint("slim")
-        elif ctrl and k == Qt.Key.Key_2:
-            self._apply_size(2); self._show_hint("medium")
-        elif ctrl and k == Qt.Key.Key_3:
-            self._apply_size(3); self._show_hint("LARGE")
-        elif ctrl and k == Qt.Key.Key_R:
-            obs_cmd("ToggleRecord"); self._show_hint("REC toggle")
-        elif ctrl and k == Qt.Key.Key_P:
-            obs_cmd("ToggleRecordPause"); self._show_hint("PAUSE toggle")
-        elif ctrl and k == Qt.Key.Key_M:
-            obs_cmd("ToggleInputMute", {"inputName": MIC_NAME}); self._show_hint("MIC toggle")
-        elif ctrl and k == Qt.Key.Key_Right:
-            self._switch_scene(1)
-        elif ctrl and k == Qt.Key.Key_Left:
-            self._switch_scene(-1)
-        elif ctrl and k == Qt.Key.Key_Q:
+        # Map keyboard shortcuts to command strings
+        KEY_MAP = {
+            Qt.Key.Key_1: "size1", Qt.Key.Key_2: "size2", Qt.Key.Key_3: "size3",
+            Qt.Key.Key_R: "rec", Qt.Key.Key_P: "pause", Qt.Key.Key_M: "mic",
+            Qt.Key.Key_Right: "next", Qt.Key.Key_Left: "prev",
+        }
+
+        if ctrl and k == Qt.Key.Key_Q:
             self.close()
+        elif ctrl and k in KEY_MAP:
+            self.dispatcher.handle(KEY_MAP[k])
         else:
             super().keyPressEvent(event)
 
@@ -211,64 +234,12 @@ class IndicatorBar(QWidget):
         """Receive commands from Unix socket IPC (+ legacy file fallback)."""
         # Primary: Unix socket (reliable, ordered, no message loss)
         for cmd in self.ipc.recv_all():
-            self._handle_cmd(cmd)
+            self.dispatcher.handle(cmd)
 
         # Legacy: file-based fallback for old obs-bar-ctl users
         legacy = check_legacy_cmd_file()
         if legacy:
-            self._handle_cmd(legacy)
-
-    def _handle_cmd(self, cmd):
-        """Process a single command string."""
-        if cmd.startswith("size"):
-            try:
-                self._apply_size(int(cmd[4]))
-            except (ValueError, KeyError):
-                pass
-        elif cmd == "rec":
-            obs_cmd("ToggleRecord"); self._show_hint("REC toggle")
-        elif cmd == "pause":
-            obs_cmd("ToggleRecordPause"); self._show_hint("PAUSE toggle")
-        elif cmd == "mic":
-            obs_cmd("ToggleInputMute", {"inputName": MIC_NAME}); self._show_hint("MIC toggle")
-        elif cmd == "next":
-            self._switch_scene(1)
-        elif cmd == "prev":
-            self._switch_scene(-1)
-        elif cmd.startswith("react:"):
-            self.reaction_overlay.spawn(cmd.split(":", 1)[1])
-        elif cmd.startswith("scene:"):
-            obs_cmd("SetCurrentProgramScene", {"sceneName": cmd.split(":", 1)[1]})
-        elif cmd.startswith("chapter:"):
-            title = cmd.split(":", 1)[1]
-            offset = self.chapters.add(title)
-            if offset is not None:
-                m, s = int(offset // 60), int(offset % 60)
-                self._show_hint(f"CH {m:02d}:{s:02d} {title}")
-            else:
-                self._show_hint("Not recording")
-        elif cmd.startswith("target:"):
-            try:
-                self.state.target_duration = int(cmd.split(":", 1)[1])
-                self._show_hint(f"Target: {self.state.target_duration}min")
-            except ValueError:
-                pass
-        elif cmd.startswith("auto_scene:"):
-            val = cmd.split(":", 1)[1].lower()
-            self.state.auto_scene_enabled = val in ("on", "1", "true")
-            self._show_hint("AutoScene " + ("ON" if self.state.auto_scene_enabled else "OFF"))
-        elif cmd.startswith("cl_start:"):
-            self.reaction_overlay.checklist_start(cmd.split(":", 1)[1])
-        elif cmd.startswith("cl_add:"):
-            self.reaction_overlay.checklist_add(cmd.split(":", 1)[1])
-        elif cmd.startswith("cl_run:"):
-            self.reaction_overlay.checklist_run(int(cmd.split(":", 1)[1]))
-        elif cmd.startswith("cl_pass:"):
-            self.reaction_overlay.checklist_pass(int(cmd.split(":", 1)[1]))
-        elif cmd.startswith("cl_fail:"):
-            self.reaction_overlay.checklist_fail(int(cmd.split(":", 1)[1]))
-        elif cmd == "cl_clear":
-            self.reaction_overlay.checklist_clear()
+            self.dispatcher.handle(legacy)
 
     # ── Animation ──────────────────────────────────────────
 
@@ -294,9 +265,9 @@ class IndicatorBar(QWidget):
         zones = self._zones()
         self._click_zones.clear()
 
-        font = QFont("JetBrains Mono", fs, QFont.Weight.Bold)
+        font = QFont(self._mono_font, fs, QFont.Weight.Bold)
         font.setStyleHint(QFont.StyleHint.Monospace)
-        sm = QFont("JetBrains Mono", max(7, fs - 2), QFont.Weight.Bold)
+        sm = QFont(self._mono_font, max(7, fs - 2), QFont.Weight.Bold)
         sm.setStyleHint(QFont.StyleHint.Monospace)
 
         self._draw_background(painter, w, h, gw_base)
@@ -483,7 +454,7 @@ class IndicatorBar(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRoundedRect(br, 4, 4)
 
-            ef = QFont("Noto Color Emoji", max(8, bh_ // 2 - 2))
+            ef = QFont(self._emoji_font, max(8, bh_ // 2 - 2))
             p.setFont(ef)
             p.setPen(QColor("#ffffff"))
             p.drawText(br, Qt.AlignmentFlag.AlignCenter,
@@ -498,7 +469,7 @@ class IndicatorBar(QWidget):
 
         if self._hint_text and time.time() < self._hint_until:
             alpha = min(1.0, (self._hint_until - time.time()) / 0.3)
-            p.setFont(QFont("JetBrains Mono", max(8, fs - 4)))
+            p.setFont(QFont(self._mono_font, max(8, fs - 4)))
             p.setPen(QColor(136, 136, 136, int(255 * alpha)))
             p.drawText(z.adjusted(0, 0, -8, 0),
                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -528,7 +499,7 @@ class IndicatorBar(QWidget):
 
         # Auto-scene indicator
         if self.state.auto_scene_enabled:
-            p.setFont(QFont("JetBrains Mono", max(6, fs - 4)))
+            p.setFont(QFont(self._mono_font, max(6, fs - 4)))
             p.setPen(QColor("#4CAF50"))
             p.drawText(z.adjusted(4, 0, -bw_ * 2 - 10, 0),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, "AUTO")
@@ -536,7 +507,7 @@ class IndicatorBar(QWidget):
         # Settings gear
         gr = QRect(z.right() - bw_ * 2 - 6, 0, bw_, h)
         self._click_zones["settings"] = gr
-        p.setFont(QFont("JetBrains Mono", max(9, fs)))
+        p.setFont(QFont(self._mono_font, max(9, fs)))
         p.setPen(QColor("#556677"))
         p.drawText(gr, Qt.AlignmentFlag.AlignCenter, "\u2699")
 

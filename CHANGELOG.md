@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.0 — 2026-02-28
+
+Platform hardening and remaining technical debt cleared.
+
+### Added
+- **Config hot-reload** — edit `config.json` and changes apply instantly (QFileSystemWatcher)
+- **Platform detection** (`platform.py`) — X11/Wayland detection, font probing, xdotool check
+- **Font fallback chain** — JetBrains Mono -> Fira Code -> DejaVu Sans Mono -> system monospace
+- **Command dispatcher** (`commands.py`) — extracted from bar.py, testable independently
+- **systemd user unit** (`recbar.service`) — `./install.sh --systemd` enables on login
+- 15 new tests (platform detection + command dispatcher) — **34 total**
+
+### Changed
+- Wayland: skip X11BypassWindowManagerHint and XShape, auto-scene disabled with warning
+- Auto-scene: exits immediately on Wayland or missing xdotool instead of spinning
+- Overlay: skip XShape on Wayland, rely on Qt-level passthrough
+- Keyboard shortcuts now route through CommandDispatcher (single code path)
+- Startup banner shows session type and platform warnings
+- bar.py reduced from 613 -> 584 lines (command handling extracted)
+
+### Fixed
+- Hardcoded "JetBrains Mono" / "Noto Color Emoji" — now auto-detected with fallbacks
+- X11BypassWindowManagerHint crash on Wayland compositors
+
 ## 1.1.0 — 2026-02-28
 
 Post-review hardening. All 5 priority items from Grok 4.2 review addressed.

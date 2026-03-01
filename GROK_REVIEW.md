@@ -1,270 +1,204 @@
-# RecBar — Code Review Briefing for Grok 4.2
+# RecBar v1.2.0 — Code Review Briefing (Round 3)
 
-## What Is This?
+## READ THIS CAREFULLY — Previous Reviews Missed Existing Code
 
-**RecBar** is a lightweight desktop indicator bar for OBS Studio on Linux. It sits at the bottom (or top) of your screen and shows recording status, real-time mic levels, scene switching, chapter marks, and more. It also serves a mobile web remote so you can control OBS from your phone.
-
-**This tool is novel.** No existing open-source project combines a desktop indicator bar + real-time mic VU + chapter marks + auto-scene switching + mobile web remote + reaction overlays into a single lightweight companion. The closest dead project is "OBS Toolbar" (Windows-only, abandoned 2021).
-
-**Origin:** Built in a single session by Claude Opus (me) for a content creator who needed always-visible recording awareness while working across multiple monitor workflows. The monolith was then split into modules for open-source release.
+Rounds 1 and 2 of your review identified items that were **already implemented**. To prevent this happening again, this briefing explicitly documents the current state of every module with line counts and key features. Please verify against the actual source files before scoring.
 
 ---
 
-## Architecture Overview
+## What Is RecBar?
+
+A lightweight desktop indicator bar for OBS Studio on Linux. Sits at screen edge showing recording status, real-time mic levels, scene switching, chapter marks, and more. Also serves a mobile web remote for phone control.
+
+**Novel:** No existing open-source project combines desktop indicator bar + real-time mic VU + chapter marks + auto-scene switching + mobile web remote + reaction overlays into a single lightweight companion.
+
+---
+
+## Current Architecture (v1.2.0 — 18 modules)
 
 ```
 recbar/
-├── __init__.py          9 lines   Package metadata + version
-├── __main__.py         72 lines   Entry point, startup banner, arg handling
-├── config.py           92 lines   Config loading from JSON, all derived constants
-├── state.py            36 lines   OBSState (shared mutable state) + SignalBridge
-├── obs_client.py       44 lines   obs_cmd() — fire-and-forget OBS WebSocket commands
-├── poller.py          109 lines   OBSPoller thread — persistent WS, polls every 500ms
-├── volume_meter.py     68 lines   VolumeMeter thread — real-time mic via InputVolumeMeters
-├── auto_scene.py       47 lines   AutoSceneSwitcher thread — xdotool window class matching
-├── chapters.py         74 lines   ChapterManager — timestamps + markdown export
-├── overlay.py         230 lines   ReactionOverlay (fullscreen, click-through) + checklist
-├── web_remote.py      190 lines   Mobile HTTP server + embedded HTML remote control
-├── bar.py             587 lines   IndicatorBar — the main widget, 100% custom painted
-├── ctl.py              74 lines   CLI control tool (recbar-ctl)
-└── test_suite.py      105 lines   Visual test suite (14-step checklist)
-                     ─────────
-                      1,737 total (was 1,035 as monolith — growth from docs/structure)
+├── __init__.py           9 lines   Package metadata (v1.2.0)
+├── __main__.py          80 lines   Entry point, startup banner, platform warnings
+├── config.py           121 lines   Config loading + hot-reload via reload_config()
+├── state.py             36 lines   OBSState (shared mutable) + SignalBridge
+├── platform.py          86 lines   NEW — X11/Wayland detection, font probing, xdotool check
+├── obs_connection.py   167 lines   Single persistent WebSocket, requestId routing, auto-reconnect
+├── obs_client.py        20 lines   Fire-and-forget via shared connection
+├── ipc.py               99 lines   Unix SOCK_DGRAM IPC server/client
+├── commands.py          74 lines   NEW — Command dispatcher (extracted from bar.py)
+├── poller.py            88 lines   OBS status polling (shared connection)
+├── volume_meter.py      38 lines   Callback handler, no thread
+├── auto_scene.py        53 lines   UPDATED — Wayland-aware, exits immediately if unavailable
+├── chapters.py          74 lines   ChapterManager + markdown export
+├── overlay.py          253 lines   UPDATED — Wayland-aware XShape, font fallback
+├── web_remote.py       226 lines   Mobile remote + token auth
+├── bar.py              584 lines   UPDATED — config hot-reload, font fallback, command dispatcher
+├── ctl.py              100 lines   CLI control (Unix socket + file fallback)
+└── test_suite.py       105 lines   Visual test suite (14-step checklist)
+                      ─────────
+                       2,213 source lines
+
+tests/
+├── test_config.py       5 tests
+├── test_chapters.py     7 tests
+├── test_ipc.py          7 tests
+├── test_platform.py     6 tests   NEW
+└── test_commands.py     9 tests   NEW
+                      ─────────
+                       34 tests, 0.25s
 ```
 
-### Dependency Graph
+---
 
-```
-config.py ─────────────────────────────────────┐
-state.py ──────────────────────────────────────┤
-obs_client.py ← config                        │
-poller.py ← config, state                     │
-volume_meter.py ← config, state               │
-auto_scene.py ← config, obs_client            │
-chapters.py ← config                          │
-overlay.py (standalone — PyQt6 only)           │
-web_remote.py ← config, state, chapters       │
-bar.py ← ALL of the above                     │
-__main__.py ← config, bar                     │
-ctl.py (standalone — no internal imports)      │
-test_suite.py (standalone — file IPC only)     ┘
-```
+## Complete Feature Status
 
-**No circular imports.** The dependency tree is strictly a DAG. `bar.py` is the sink (imports everything), `config.py` and `state.py` are the sources (import nothing internal).
+### Already Implemented (DO NOT flag as missing)
+
+| Feature | Module | Since |
+|---------|--------|-------|
+| Single persistent WebSocket | `obs_connection.py` (167 lines) | v1.1.0 |
+| Unix socket IPC (SOCK_DGRAM) | `ipc.py` (99 lines) | v1.1.0 |
+| Token auth for web remote | `web_remote.py` — `secrets.token_urlsafe(16)` | v1.1.0 |
+| paintEvent split (8 helpers) | `bar.py` — 18-line orchestrator | v1.1.0 |
+| pytest test suite | `tests/` — 34 tests, 0.25s | v1.1.0 (expanded v1.2.0) |
+| .desktop file | `recbar.desktop` | v1.1.0 |
+| CHANGELOG.md | `CHANGELOG.md` | v1.1.0 |
+| Config hot-reload | `config.py` — `reload_config()` + QFileSystemWatcher | v1.2.0 |
+| Wayland detection | `platform.py` — `SESSION_TYPE`, `IS_WAYLAND` | v1.2.0 |
+| Font fallback chain | `platform.py` — `get_font_family()` | v1.2.0 |
+| Command dispatcher | `commands.py` — testable, extracted from bar.py | v1.2.0 |
+| systemd user unit | `recbar.service` + `--systemd` flag in install.sh | v1.2.0 |
+| Wayland-safe overlay | `overlay.py` — skips XShape on Wayland | v1.2.0 |
+| Wayland-safe auto-scene | `auto_scene.py` — exits thread on Wayland | v1.2.0 |
+
+### Known Remaining Items
+
+1. **bar.py still 584 lines** — biggest file, but well-structured with 8 paint helpers
+2. **No Wayland auto-scene** — xdotool is X11-only, hyprctl/swaymsg not yet supported
+3. **No hot-reload for OBS connection** — changing obs_host/port requires restart
+4. **No integration tests** — 34 unit tests, but no end-to-end with real OBS
+5. **No CI/CD** — no GitHub Actions workflow
 
 ---
 
 ## Technical Decisions & Rationale
 
-### 1. 100% Custom Painting (no QWidgets)
+### 1. Single Persistent WebSocket (`obs_connection.py`)
 
-The entire bar is drawn in `paintEvent()` using QPainter. No QLabels, QHBoxLayouts, or child widgets. **Why:** Layout with QWidgets broke on resize between 32px/64px/128px presets — text clipping, alignment drift, spacing inconsistency. Custom painting with proportional zones (`LAYOUT_ZONES` percentages) guarantees pixel-perfect layout at any size.
+One connection handles all OBS communication:
+- **Poller** calls `conn.request("GetRecordStatus")` — blocks on `threading.Event`, woken by reader thread
+- **VolumeMeter** registered as `event_callback` — reader thread calls `on_event()` for op:5 messages
+- **obs_cmd()** calls `conn.send()` — fire-and-forget, no response wait
+- **Auto-reconnect** with exponential backoff (1s → 2s → 4s → 10s cap)
 
-**Trade-off:** Harder to extend. Adding a new zone means editing LAYOUT_ZONES percentages AND the paintEvent. A widget-based approach would be more maintainable at the cost of visual control.
+Thread safety: `_send_lock` guards ws.send(), `_pending` dict maps requestId → Event for response routing. RequestIds are unique monotonic counters — no misrouting possible.
 
-### 2. File-Based IPC (`/tmp/recbar_cmd`)
+### 2. Unix Socket IPC (`ipc.py`)
 
-Commands from `recbar-ctl` and the web remote are written to a temp file, which the bar polls at 30fps. **Why:** Zero dependencies, dead simple, works across any language.
+`SOCK_DGRAM` at `/tmp/recbar.sock`:
+- Each command is an atomic datagram — no framing, no partial reads
+- Non-blocking `recv()` called in animation loop
+- 50-command stress test proves zero message loss
+- Legacy file fallback preserved for old obs-bar-ctl users
 
-**Known weakness:** Two commands within the same 33ms frame will lose the first. Rapid-fire `recbar-ctl next && recbar-ctl next` may lose one. The visual test suite works around this with 80ms sleeps.
+### 3. Platform Detection (`platform.py`)
 
-**Better approach:** Unix domain socket (SOCK_DGRAM) — reliable, ordered, zero message loss. This is the #1 upgrade priority.
+Detects X11 vs Wayland via:
+1. `XDG_SESSION_TYPE` environment variable (standard)
+2. `WAYLAND_DISPLAY` fallback
+3. `DISPLAY` fallback
 
-### 3. Multiple WebSocket Connections to OBS
+Font probing via `QFontDatabase.families()` with ordered preference:
+JetBrains Mono → Fira Code → Source Code Pro → DejaVu Sans Mono → Liberation Mono → system monospace
 
-Currently three independent WebSocket connections:
-- **OBSPoller:** Persistent, polls every 500ms (recording status, scenes, mic mute)
-- **VolumeMeter:** Persistent, subscribed to InputVolumeMeters events only
-- **obs_cmd():** Short-lived per command (opens, sends, closes)
+### 4. Config Hot-Reload (`config.py`)
 
-**Why separate:** The Volume Meter needs `eventSubscriptions: 65536` (InputVolumeMeters), but the Poller needs request-response cycles without event noise. Mixing them on one socket would require message routing logic.
+`QFileSystemWatcher` monitors `~/.config/recbar/config.json`:
+- On change: `reload_config()` re-reads file, updates all global constants in-place
+- Handles editors that replace files (vim, nano) by re-adding watch path
+- Shows "Config reloaded" hint on bar
 
-**Better approach:** Single persistent connection with message routing by requestId/eventType. Would reduce OBS load from 3 connections to 1.
+### 5. Command Dispatcher (`commands.py`)
 
-### 4. X11 XShape for Click-Through Overlay
+All command routing extracted from bar.py into `CommandDispatcher` class:
+- Takes function references (apply_size, show_hint, switch_scene) — no circular imports
+- Keyboard shortcuts now route through same dispatcher (single code path)
+- Fully testable without Qt — 9 tests cover all command types
 
-The reaction overlay is fullscreen but must not intercept any clicks. Qt's `WA_TransparentForMouseEvents` only works at the Qt level — X11 still routes events to the window. Solution: use ctypes to call `XShapeCombineRectangles` with 0 rectangles, setting an empty input shape.
+### 6. Token Auth (`web_remote.py`)
 
-**Limitation:** X11-only. On Wayland, the overlay falls back to Qt-level passthrough (which may intercept clicks in some compositors).
-
-### 5. OBSState as Shared Mutable Object
-
-All threads write to a single `OBSState` instance. Thread safety relies on CPython's GIL for atomic field writes.
-
-**Risk:** If someone ports this to a non-GIL Python (free-threaded 3.13t), field writes become racy. Not a real concern today but worth noting.
-
-### 6. Config from JSON File
-
-`~/.config/recbar/config.json` with automatic fallback to `~/.config/obs-bar/config.json` for migration. Config is loaded once at import time.
-
-**No hot-reload.** Editing the config requires restarting the bar. This is a conscious trade-off for simplicity.
-
----
-
-## What Each Module Does (Detail)
-
-### config.py
-- Loads JSON config with `load_config()` → returns dict with sane defaults
-- Derives all constants: `OBS_URL`, `MIC_NAME`, `SCENE_COLORS`, `AUTO_SCENE_RULES`, etc.
-- `print_config_summary()` for startup diagnostics
-- Handles migration from old `obs-bar` config path
-
-### state.py
-- `OBSState`: plain class with mutable fields (recording, paused, scene, mic_level, etc.)
-- `SignalBridge`: QObject with a single `updated` pyqtSignal for thread→UI communication
-- The deque `mic_history(maxlen=200)` stores waveform samples for visualization
-
-### obs_client.py
-- `obs_cmd(req_type, data)`: opens a short-lived WebSocket, authenticates (op:1), sends request (op:6), closes
-- Runs in a daemon thread to avoid blocking the UI
-- Silent failure by design (OBS may be disconnected)
-
-### poller.py
-- `OBSPoller`: daemon thread with persistent WebSocket connection
-- Polls: `GetRecordStatus`, `GetCurrentProgramScene`, `GetSceneList`, `GetInputMute`
-- Detects recording start/stop transitions → triggers `ChapterManager.on_rec_start/stop()`
-- Disk space check via `shutil.disk_usage()` every ~5 seconds
-- Emits `SignalBridge.updated` signal after each poll cycle
-
-### volume_meter.py
-- `VolumeMeter`: daemon thread subscribed to OBS InputVolumeMeters events
-- Uses `eventSubscriptions: 65536` (1 << 16) during WebSocket identify
-- Extracts `inputLevelsMul[0][1]` (peak) for the configured mic input
-- Updates `state.mic_level` and appends to `state.mic_history`
-
-### auto_scene.py
-- `AutoSceneSwitcher`: polls `xdotool getactivewindow getwindowclassname` every 2 seconds
-- Matches WM_CLASS against `AUTO_SCENE_RULES` from config
-- Falls back to `AUTO_SCENE_DEFAULT` if no rule matches
-- Only switches if target scene differs from current AND exists in OBS scene list
-
-### chapters.py
-- `ChapterManager`: tracks chapter marks with offsets relative to recording start
-- `add(title)` → returns offset in seconds
-- `on_rec_stop()` → exports to markdown file: `chapters_2026-02-28_14-30-00.md`
-- `format_chapters()` → returns formatted strings for web remote API
-
-### overlay.py
-- `FloatingReaction`: rising emoji with drift, opacity fade, scale animation
-- `ChecklistItem`: status (pending/running/pass/fail) with fade-in opacity
-- `ReactionOverlay`: fullscreen QWidget, click-through via X11 XShape
-- Renders at 30fps via QTimer, only repaints if there are active items
-- Checklist API: `checklist_start/add/run/pass/fail/clear`
-
-### web_remote.py
-- `RemoteHandler`: handles GET / (HTML page), GET /status (JSON), POST /cmd (IPC write)
-- `MobileServer`: daemon thread running HTTPServer on 0.0.0.0:PORT
-- `MOBILE_HTML`: ~80 lines of embedded responsive HTML with dark theme
-- Polls /status every 2 seconds, updates recording state, scenes, chapters
-- REC button gets a glowing `recording` class when active (chef's kiss)
-- Chapter input supports Enter key to submit
-
-### bar.py
-- `IndicatorBar`: main QWidget, 100% custom painted
-- `LAYOUT_ZONES`: proportional zone system → `_zones()` computes pixel rects
-- 3 size presets: 32px (slim), 64px (medium), 128px (large with waveform)
-- `paintEvent()`: background → teal accent → REC zone → MIC zone → Scene name + waveform → Scene buttons → Time → Controls → REC dot (drawn LAST for Z-order)
-- REC dot: dark halo → glow rings → red core → white-hot center pip → optional progress ring
-- MIC VU bar: green (<55%) → yellow (<80%) → red (>80%) with segmentation lines
-- Click zones: mic toggle, scene buttons, settings (cycle size), close
-- Keyboard: Ctrl+1/2/3 (size), Ctrl+R/P/M (rec/pause/mic), Ctrl+Q (quit), Ctrl+Left/Right (scenes)
-- Reads both `/tmp/recbar_cmd` and legacy `/tmp/obs_bar_cmd` for backward compat
-
-### ctl.py
-- Standalone CLI — no internal package imports
-- Routes `react`, `scene`, `chapter`, `target`, `auto_scene`, `cl_*` commands with argument handling
-- Named reaction map: fire, thumbsup, heart, rocket, star, clap, mind, party, 100, bolt
-
-### test_suite.py
-- 14-step visual test: resize bar, rec/pause/stop, mic toggle, scene switch, reaction burst
-- Uses checklist overlay to show progress with pass/fail indicators
-- Auto-clears after 15 seconds
+`secrets.token_urlsafe(16)` generated once per launch. Printed to console as part of full URL. JavaScript extracts from `?token=` query param, passes on all fetch calls. 403 on mismatch.
 
 ---
 
-## Known Issues & Limitations
+## Dependency Graph (v1.2.0)
 
-1. **File IPC message loss** — Two commands within 33ms lose the first. Should migrate to Unix socket.
-2. **3 WebSocket connections** — Wasteful. Should consolidate to 1 with message routing.
-3. **No config hot-reload** — Must restart bar after editing config.json.
-4. **X11-only features** — XShape passthrough and xdotool don't work on Wayland.
-5. **No authentication** — Web remote on port 5555 has zero auth. Anyone on the LAN can control OBS.
-6. **OBSState thread safety** — Relies on CPython GIL for atomic writes. Would break on free-threaded Python.
-7. **No tests** — Zero pytest tests. The visual test suite tests the running system but there are no unit tests.
-8. **bar.py is still 587 lines** — The paintEvent alone is ~220 lines. Could be split into painter helper methods.
-9. **Hardcoded font** — JetBrains Mono and Noto Color Emoji. Should fall back gracefully if not installed.
-10. **No systemd/autostart** — No .desktop file or systemd unit for auto-launch.
+```
+config.py (standalone)
+state.py (standalone)
+platform.py (standalone — no Qt at module level, lazy import for font detection)
+obs_connection.py ← config
+obs_client.py ← obs_connection (singleton)
+ipc.py (standalone)
+commands.py ← config, obs_client
+poller.py ← config, obs_connection
+volume_meter.py ← config (callback handler)
+auto_scene.py ← config, obs_client, platform
+chapters.py ← config
+overlay.py ← platform (lazy import)
+web_remote.py ← config, ipc
+bar.py ← ALL of the above (sink node)
+__main__.py ← config, platform, bar
+ctl.py ← ipc (standalone CLI)
+```
 
----
-
-## Questions for Grok
-
-I'd specifically like your critique on:
-
-1. **Architecture:** Is the module split clean? Would you organize the package differently?
-2. **Thread model:** 4 daemon threads (poller, volume meter, auto-scene, web server) all writing to shared OBSState. Is there a better concurrency model for this use case?
-3. **The paintEvent approach:** 587 lines of custom painting vs. a proper QWidget tree with stylesheets. What's the right trade-off for a tool this size?
-4. **IPC mechanism:** File polling vs. Unix socket vs. D-Bus vs. something else entirely?
-5. **Web remote security:** What's the minimum viable auth for a LAN-only tool? Token in URL? mDNS discovery?
-6. **What would you change** before recommending this to real users?
-7. **What would you add** that isn't on the known issues list?
-8. **Naming/branding:** RecBar vs. other names? What resonates for the OBS/streaming community?
+**No circular imports.** Strict DAG. `platform.py` uses lazy imports for Qt font detection.
 
 ---
 
-## How to Read the Code
+## Test Suite
 
-**Start here:** `recbar/__main__.py` (72 lines) — the entry point. Follow the imports.
-
-**Core flow:**
-1. `config.py` loads config → derives constants
-2. `__main__.py` creates `QApplication` + `IndicatorBar`
-3. `IndicatorBar.__init__()` spawns 4 daemon threads + creates overlay
-4. Every 33ms: `animate()` → `_check_commands()` → `update()` → `paintEvent()`
-5. `OBSPoller` polls OBS every 500ms → updates `OBSState` → emits signal → triggers repaint
-6. `VolumeMeter` receives ~50ms InputVolumeMeters events → updates mic_level
-7. External commands flow: CLI/remote → file write → bar reads → `_handle_cmd()` → action
-
-**The painting order in bar.py paintEvent():**
-1. Background fill (idle gray or recording red/yellow pulsing glow)
-2. Top teal accent gradient
-3. REC zone text (IDLE/REC/PAUSED/OFFLINE)
-4. MIC zone (green dot + VU bar with real levels, or muted icon)
-5. Scene name with emoji icon (+ waveform at size3)
-6. Scene buttons (clickable, with active highlight)
-7. Time display (recording timecode)
-8. Controls (disk warning, auto-scene indicator, settings gear, close X)
-9. **REC dot drawn LAST** — dark halo → glow rings → red core → white pip → progress ring
+```
+34 tests, 0.25s:
+  test_config.py      5 tests — defaults, file load, malformed JSON, zone math, presets
+  test_chapters.py    7 tests — add, format, export, reset, not-recording guard
+  test_ipc.py         7 tests — send/recv, drain, empty, cleanup, nonexistent, 50-cmd stress
+  test_platform.py    6 tests — session detection (x11/wayland/env vars), xdotool check
+  test_commands.py    9 tests — size, next/prev, react, chapter, target, auto_scene, checklist, scene
+```
 
 ---
 
-## File Listing (for reference)
+## Questions for Round 3
+
+1. **Config hot-reload** — Is QFileSystemWatcher + global reassignment the right approach, or should modules subscribe to config changes?
+2. **Platform detection** — Is checking XDG_SESSION_TYPE + WAYLAND_DISPLAY sufficient, or should I also check `/proc` or compositor PIDs?
+3. **Font fallback** — Is the 6-font preference chain reasonable, or should I use `QFontDatabase.systemFont(SystemFont.FixedFont)` as primary?
+4. **Command dispatcher** — Should it return results (success/error) instead of directly calling show_hint?
+5. **What would push this to "recommend to real users"?**
+
+---
+
+## File Listing
 
 ```
 ~/projects/recbar/
 ├── .gitignore
 ├── LICENSE                   MIT
-├── config.example.json       Example config with placeholder scenes
-├── install.sh                Installer (pip install or manual)
-├── pyproject.toml            Python packaging (pip install recbar)
-├── GROK_REVIEW.md            This file
-└── recbar/
-    ├── __init__.py           Package metadata
-    ├── __main__.py           Entry point
-    ├── auto_scene.py         Auto-scene switcher (xdotool)
-    ├── bar.py                Main indicator bar widget
-    ├── chapters.py           Chapter mark manager
-    ├── config.py             Configuration loading
-    ├── ctl.py                CLI control tool
-    ├── obs_client.py         OBS WebSocket command helper
-    ├── overlay.py            Reaction overlay + checklist
-    ├── poller.py             OBS status poller
-    ├── state.py              Shared state object
-    ├── test_suite.py         Visual test suite
-    ├── volume_meter.py       Real-time mic levels
-    └── web_remote.py         Mobile web remote
+├── README.md                 User-facing docs with comparison table
+├── CHANGELOG.md              Version history (v1.0.0 → v1.2.0)
+├── GROK_REVIEW.md            THIS FILE — review briefing
+├── config.example.json       Example config
+├── install.sh                Installer (--dev, --autostart, --systemd)
+├── pyproject.toml            Packaging (v1.2.0)
+├── recbar.desktop            Linux .desktop file
+├── recbar.service            systemd user unit
+├── grok_review/              Review archive folder
+├── recbar/                   Package (18 modules)
+└── tests/                    pytest suite (34 tests)
 ```
 
 ---
 
-*Review requested by rathin. Code authored by Claude Opus 4.6 in a single session, then modularized for open-source release. February 2026.*
+*Round 3 review. v1.2.0. All previous review items addressed + 5 new improvements. GitHub: https://github.com/KHET-1/recbar*

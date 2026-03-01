@@ -15,6 +15,18 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
 
+# Late-import font detection to avoid circular imports
+_mono_font = None
+_emoji_font = None
+
+
+def _get_fonts():
+    global _mono_font, _emoji_font
+    if _mono_font is None:
+        from .platform import get_font_family
+        _mono_font, _emoji_font = get_font_family()
+    return _mono_font, _emoji_font
+
 
 class FloatingReaction:
     """A single emoji reaction that floats upward and fades."""
@@ -92,7 +104,15 @@ class ReactionOverlay(QWidget):
         QTimer.singleShot(100, self._x11_passthrough)
 
     def _x11_passthrough(self):
-        """Set empty X11 input shape so clicks pass through to windows below."""
+        """Set empty X11 input shape so clicks pass through to windows below.
+
+        On Wayland, this is skipped — Qt's WA_TransparentForMouseEvents
+        handles it (less reliable but functional).
+        """
+        from .platform import IS_X11
+        if not IS_X11:
+            return  # Wayland: rely on Qt-level passthrough (set in __init__)
+
         try:
             import ctypes
             import ctypes.util
@@ -112,7 +132,7 @@ class ReactionOverlay(QWidget):
             xlib.XFlush(d)
             xlib.XCloseDisplay(d)
         except Exception:
-            pass  # Wayland or missing Xext — fall back to Qt-level passthrough
+            pass  # Missing Xext — fall back to Qt-level passthrough
 
     # ── Reaction API ───────────────────────────────────────
 
@@ -192,7 +212,8 @@ class ReactionOverlay(QWidget):
             # Title
             p.save()
             p.setOpacity(0.95)
-            p.setFont(QFont("JetBrains Mono", 13, QFont.Weight.Bold))
+            mono, _ = _get_fonts()
+            p.setFont(QFont(mono, 13, QFont.Weight.Bold))
             p.setPen(QColor("#ffffff"))
             p.drawText(px + 16, py + lh, self.checklist_title)
             p.restore()
@@ -207,7 +228,8 @@ class ReactionOverlay(QWidget):
                 y = py + (i + 2) * lh
                 p.save()
                 p.setOpacity(item.opacity)
-                p.setFont(QFont("JetBrains Mono", 11))
+                mono, _ = _get_fonts()
+                p.setFont(QFont(mono, 11))
                 if item.status == "running":
                     pulse = 0.6 + 0.4 * math.sin(time.time() * 4)
                     ic, c = "\u25B6", QColor(255, 235, 59, int(255 * pulse))
@@ -223,7 +245,8 @@ class ReactionOverlay(QWidget):
                 continue
             p.save()
             p.setOpacity(r.opacity)
-            p.setFont(QFont("Noto Color Emoji", max(8, int(r.size * r.scale))))
+            _, emoji = _get_fonts()
+            p.setFont(QFont(emoji, max(8, int(r.size * r.scale))))
             p.drawText(int(r.x), int(r.y), r.emoji)
             p.restore()
 

@@ -1,0 +1,14 @@
+[Unit]
+Description=RecBar — OBS recording companion bar
+Documentation=https://github.com/KHET-1/recbar
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/recbar
+Restart=on-failure
+RestartSec=3
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=graphical-session.target

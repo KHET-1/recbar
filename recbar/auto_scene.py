@@ -3,7 +3,8 @@
 Uses xdotool to poll the active window's WM_CLASS every 2 seconds.
 Matches against user-defined rules in config.json.
 
-Note: xdotool is X11-only. On Wayland, this thread does nothing.
+Platform: xdotool is X11-only. On Wayland, auto-scene is disabled with a
+warning at startup. Future: hyprctl/swaymsg support.
 """
 
 import subprocess
@@ -12,6 +13,7 @@ import threading
 
 from .config import AUTO_SCENE_RULES, AUTO_SCENE_DEFAULT
 from .obs_client import obs_cmd
+from .platform import IS_WAYLAND, HAS_XDOTOOL
 
 
 class AutoSceneSwitcher(threading.Thread):
@@ -21,8 +23,12 @@ class AutoSceneSwitcher(threading.Thread):
         super().__init__(daemon=True)
         self.state = state
         self.last_scene = ""
+        self.available = HAS_XDOTOOL and not IS_WAYLAND
 
     def run(self):
+        if not self.available:
+            return  # Exit thread immediately on Wayland or missing xdotool
+
         while True:
             if self.state.auto_scene_enabled and self.state.connected:
                 try:

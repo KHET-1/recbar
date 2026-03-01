@@ -80,13 +80,42 @@ WEB_PORT = CFG["web_port"]
 DISK_WARN_GB = CFG["disk_warn_gb"]
 
 
+def reload_config():
+    """Reload config from disk and update all derived constants in-place.
+
+    Called by QFileSystemWatcher when config.json changes.
+    Returns True if reload succeeded, False on error.
+    """
+    global CFG, SCENE_COLORS, SCENE_ICONS, RECORDING_PATH, OBS_URL
+    global MIC_NAME, AUTO_SCENE_RULES, AUTO_SCENE_DEFAULT, WEB_PORT, DISK_WARN_GB
+
+    try:
+        new_cfg = load_config()
+    except Exception:
+        return False
+
+    CFG = new_cfg
+    SCENE_COLORS = {name: s["color"] for name, s in CFG["scenes"].items()}
+    SCENE_ICONS = {name: s.get("icon", "\U0001F4FA") for name, s in CFG["scenes"].items()}
+    RECORDING_PATH = os.path.expanduser(CFG["recording_path"])
+    OBS_URL = f"ws://{CFG['obs_host']}:{CFG['obs_port']}"
+    MIC_NAME = CFG["mic_input_name"]
+    AUTO_SCENE_RULES = [(r["match"], r["scene"]) for r in CFG["auto_scene_rules"]]
+    AUTO_SCENE_DEFAULT = CFG["auto_scene_default"]
+    WEB_PORT = CFG["web_port"]
+    DISK_WARN_GB = CFG["disk_warn_gb"]
+    return True
+
+
 def print_config_summary():
     """Print startup config info for diagnostics."""
+    from .platform import SESSION_TYPE, HAS_XDOTOOL
     print(f"  Config:    {CONFIG_PATH}")
     print(f"  OBS:       {OBS_URL}")
     print(f"  Mic:       {MIC_NAME}")
     print(f"  Scenes:    {len(CFG['scenes'])} configured")
     print(f"  Rec path:  {RECORDING_PATH}")
     print(f"  Web port:  {WEB_PORT}")
+    print(f"  Session:   {SESSION_TYPE}" + ("" if HAS_XDOTOOL else " (xdotool not found)"))
     if AUTO_SCENE_RULES:
         print(f"  Auto-scene: {len(AUTO_SCENE_RULES)} rules")
