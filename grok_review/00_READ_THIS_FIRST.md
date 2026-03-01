@@ -1,48 +1,59 @@
-# Grok 4.2 Review Package — RecBar
+# Grok 4.2 Review Package — RecBar (v1.1 Post-Review)
 
-## Start Here
-Read `GROK_REVIEW.md` first — it's the full briefing with architecture, rationale, known issues, and 8 specific questions for your critique.
+## What Changed Since Last Review
+All 5 of your top priority items have been addressed:
 
-## Reading Order (recommended)
+1. **Single persistent WebSocket** — new `obs_connection.py` replaces 3 separate connections with 1 shared connection using requestId matching + event callback routing
+2. **Split paintEvent** — 220-line monolith is now 18-line orchestrator + 8 named helper methods
+3. **Unix socket IPC** — new `ipc.py` replaces file-based `/tmp/recbar_cmd` with Unix SOCK_DGRAM. 50-command stress test proves zero message loss
+4. **Token auth for web remote** — random token generated on launch, all requests require `?token=XXX`
+5. **pytest tests** — 19 tests covering config, chapters, and IPC. All passing in 0.23s
+
+## Reading Order (updated)
 
 | # | File | Lines | What It Is |
 |---|------|-------|------------|
-| 1 | `GROK_REVIEW.md` | 271 | **START HERE** — full briefing, architecture, questions |
-| 2 | `README.md` | 120 | User-facing docs, install, usage |
-| 3 | `pyproject.toml` | 56 | Python packaging, dependencies, entry points |
-| 4 | `config.example.json` | 23 | Example user config |
-| 5 | `__main__.py` | 72 | Entry point — follow imports from here |
-| 6 | `config.py` | 92 | Config loading, all derived constants |
-| 7 | `state.py` | 36 | Shared mutable state + Qt signal bridge |
-| 8 | `obs_client.py` | 44 | OBS WebSocket command helper |
-| 9 | `poller.py` | 109 | OBS status polling thread |
-| 10 | `volume_meter.py` | 68 | Real-time mic levels via OBS events |
-| 11 | `auto_scene.py` | 47 | xdotool-based auto scene switching |
-| 12 | `chapters.py` | 74 | Chapter marks + markdown export |
-| 13 | `overlay.py` | 230 | Reaction overlay + checklist (X11 click-through) |
-| 14 | `web_remote.py` | 190 | Mobile HTTP remote + embedded HTML |
-| 15 | `bar.py` | 615 | **The main widget** — 100% custom painted |
-| 16 | `ctl.py` | 74 | CLI control tool |
-| 17 | `test_suite.py` | 105 | 14-step visual test suite |
+| 1 | `GROK_REVIEW.md` | 320 | **START HERE** — updated briefing |
+| 2 | `README.md` | 120 | User-facing docs |
+| 3 | `pyproject.toml` | 56 | Python packaging |
+| 4 | `config.example.json` | 23 | Example config |
+| 5 | `__main__.py` | 72 | Entry point |
+| 6 | `config.py` | 92 | Config loading |
+| 7 | `state.py` | 36 | Shared state + signal bridge |
+| 8 | `obs_connection.py` | 167 | **NEW** — single persistent WebSocket with message routing |
+| 9 | `obs_client.py` | 20 | Fire-and-forget via shared connection |
+| 10 | `ipc.py` | 99 | **NEW** — Unix socket IPC server/client |
+| 11 | `poller.py` | 88 | OBS status polling (now uses shared connection) |
+| 12 | `volume_meter.py` | 38 | **SIMPLIFIED** — callback handler, no longer a thread |
+| 13 | `auto_scene.py` | 47 | xdotool-based auto scene switching |
+| 14 | `chapters.py` | 74 | Chapter marks + markdown export |
+| 15 | `overlay.py` | 230 | Reaction overlay + checklist |
+| 16 | `web_remote.py` | 226 | Mobile remote + **token auth** |
+| 17 | `bar.py` | 613 | Main widget — **paintEvent now split into 8 helpers** |
+| 18 | `ctl.py` | 100 | CLI control (now uses Unix socket with file fallback) |
+| 19 | `test_suite.py` | 105 | Visual test suite |
 
-## What I Want From You
+**Total:** 2,016 lines source + 256 lines tests = 2,272 lines
 
-The 8 questions are in `GROK_REVIEW.md` under "Questions for Grok", but in short:
-1. Is the module split clean?
-2. Is the thread model right?
-3. Custom painting vs QWidget tree — right call?
-4. File IPC vs Unix socket vs D-Bus?
-5. Web remote security — minimum viable auth?
-6. What would you change before recommending to real users?
-7. What would you add?
-8. Naming — RecBar vs. alternatives?
+## Files to Focus On (what changed most)
 
-Be brutal. I want real critique, not compliments.
+- `obs_connection.py` — entirely new, core architectural change
+- `ipc.py` — entirely new, replaces file-based IPC
+- `bar.py` — paintEvent refactored into helpers
+- `web_remote.py` — token auth added
+- `volume_meter.py` — simplified from 68-line thread to 38-line callback
+- `poller.py` — updated to use shared connection
+
+## What I Want This Round
+
+1. Did the single WebSocket + requestId routing come out clean? Any race conditions I'm missing?
+2. Is the Unix socket approach right, or should I have gone D-Bus/named pipe?
+3. The paintEvent split — is 8 helpers the right granularity or too many/few?
+4. Token auth — is `?token=XXX` in URL sufficient for LAN-only, or do I need cookies/headers?
+5. What's still missing before this is "recommend to real users" ready?
 
 ## Context
 
-- **Author:** Claude Opus 4.6 (AI), built in a single session
-- **Platform:** Linux (X11), Python 3.13, PyQt6
-- **Novel claim:** No existing tool combines desktop bar + mic VU + chapters + auto-scene + mobile remote
 - **GitHub:** https://github.com/KHET-1/recbar
-- **Total:** 1,765 lines across 14 modules
+- **Tests:** 19 passing in 0.23s
+- **Platform:** Linux (X11), Python 3.13, PyQt6

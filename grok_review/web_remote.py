@@ -1,17 +1,27 @@
 """Mobile web remote — control OBS from your phone.
 
-Serves a responsive HTML page on http://IP:PORT with buttons for
+Serves a responsive HTML page on http://IP:PORT?token=XXX with buttons for
 recording, pause, mic, scene switching, reactions, chapters, and bar sizing.
+
+Token auth: a random token is generated on launch and printed to console.
+All requests require ?token=XXX or are rejected with 403.
 
 Auto-refreshes status every 2 seconds via /status JSON endpoint.
 """
 
 import json
+import os
+import secrets
 import socket
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 from .config import WEB_PORT
+from .ipc import send_command
+
+# Generate auth token on import (once per launch)
+AUTH_TOKEN = secrets.token_urlsafe(16)
 
 # ── Embedded mobile HTML ───────────────────────────────────
 
@@ -81,7 +91,8 @@ input{width:100%;padding:10px;background:#222240;color:#eee;border:1px solid #2a
 </div>
 <div class="footer">RecBar &mdash; OBS Recording Companion</div>
 <script>
-function send(c){fetch('/cmd',{method:'POST',body:c}).then(()=>{
+var T=new URLSearchParams(location.search).get('token')||'';
+function send(c){fetch('/cmd?token='+T,{method:'POST',body:c}).then(()=>{
 var s=document.getElementById('status');s.textContent='Sent: '+c;
 setTimeout(poll,500)}).catch(()=>{})}
 function addCh(){var t=document.getElementById('ch').value;
@@ -89,7 +100,7 @@ if(t){send('chapter:'+t);document.getElementById('ch').value=''}}
 function toggleAuto(){var b=document.getElementById('autoBtn');
 var on=b.textContent==='OFF';send('auto_scene:'+(on?'on':'off'));
 b.textContent=on?'ON':'OFF';b.style.background=on?'#1b5e20':'#222240'}
-function poll(){fetch('/status').then(r=>r.json()).then(s=>{
+function poll(){fetch('/status?token='+T).then(r=>r.json()).then(s=>{
 var st=(s.recording?(s.paused?'&#9208; PAUSED':'&#128308; REC ')+s.rec_time:'&#9899; IDLE');
 st+=' | '+s.scene+(s.mic?' | &#127908; ON':' | &#128263; OFF');
 if(s.disk>=0)st+=' | '+s.disk.toFixed(1)+'GB';
@@ -114,10 +125,30 @@ class RemoteHandler(BaseHTTPRequestHandler):
     state = None
     chapters = None
 
+    def _check_auth(self):
+        """Verify token parameter. Returns True if authorized."""
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        token = params.get('token', [None])[0]
+        if token != AUTH_TOKEN:
+            self.send_response(403)
+            self.end_headers()
+            self.wfile.write(b'Forbidden - invalid or missing token')
+            return False
+        return True
+
+    @property
+    def _clean_path(self):
+        """Return path without query string."""
+        return urlparse(self.path).path
+
     def do_GET(self):
-        if self.path == '/':
+        if not self._check_auth():
+            return
+        path = self._clean_path
+        if path == '/':
             self._respond(200, 'text/html', MOBILE_HTML.encode())
-        elif self.path == '/status':
+        elif path == '/status':
             s = self.state
             payload = json.dumps({
                 'recording': s.recording,
@@ -135,14 +166,13 @@ class RemoteHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        if self.path == '/cmd':
+        if not self._check_auth():
+            return
+        path = self._clean_path
+        if path == '/cmd':
             length = int(self.headers.get('Content-Length', 0))
             cmd = self.rfile.read(length).decode()
-            try:
-                with open('/tmp/recbar_cmd', 'w') as f:
-                    f.write(cmd)
-            except OSError:
-                pass
+            send_command(cmd)
             self._respond(200, 'text/plain', b'ok')
         else:
             self.send_response(404)
@@ -188,3 +218,9 @@ def get_local_ip():
         return ip
     except Exception:
         return '127.0.0.1'
+
+
+def get_remote_url():
+    """Get the full authenticated remote URL."""
+    ip = get_local_ip()
+    return f"http://{ip}:{WEB_PORT}?token={AUTH_TOKEN}"
