@@ -415,18 +415,12 @@ class IndicatorBar(QWidget):
 
     def _draw_scene_name(self, p, z, font, h):
         """Scene name with icon + waveform at size3."""
-        p.setFont(font)
-        sc = QColor(SCENE_COLORS.get(self.state.scene, DEFAULT_SCENE_COLOR))
-        p.setPen(sc)
-        icon = SCENE_ICONS.get(self.state.scene, DEFAULT_SCENE_ICON)
-        p.drawText(z, Qt.AlignmentFlag.AlignCenter, f"{icon}  {self.state.scene}")
-
-        # Waveform at size3
+        # Waveform behind text (size3 only)
         if self.current_size == 3 and len(self.state.mic_history) > 4:
             pts = list(self.state.mic_history)
             step = max(1, z.width() // len(pts))
-            p.setPen(QPen(QColor(0, 188, 212, 60), 1))
-            wave_amp = h * 0.35
+            p.setPen(QPen(QColor(0, 188, 212, 50), 2))
+            wave_amp = h * 0.3
             mid = h // 2
             for i in range(1, len(pts)):
                 x1 = z.x() + (i - 1) * step
@@ -437,6 +431,12 @@ class IndicatorBar(QWidget):
                 d2 = int(pts[i] * wave_amp)
                 p.drawLine(x1, mid - d1, x2, mid - d2)
                 p.drawLine(x1, mid + d1, x2, mid + d2)
+
+        p.setFont(font)
+        sc = QColor(SCENE_COLORS.get(self.state.scene, DEFAULT_SCENE_COLOR))
+        p.setPen(sc)
+        icon = SCENE_ICONS.get(self.state.scene, DEFAULT_SCENE_ICON)
+        p.drawText(z, Qt.AlignmentFlag.AlignCenter, f"{icon}  {self.state.scene}")
 
     def _draw_scene_buttons(self, p, z, h):
         """Clickable scene buttons with emoji icons."""
@@ -495,7 +495,7 @@ class IndicatorBar(QWidget):
 
     def _draw_controls(self, p, z, sm, fs, h):
         """Controls zone: connection dot, disk warning, auto-scene, gear, close."""
-        bw_ = max(22, h)
+        bw_ = max(22, h // 2)
 
         # Connection status dot
         cd = max(3, h // 10)
@@ -553,10 +553,12 @@ class IndicatorBar(QWidget):
             p.setBrush(QBrush(QColor(0, 0, 0, 210)))
             p.drawEllipse(dx - dr - 4, dy - dr - 4, (dr + 4) * 2, (dr + 4) * 2)
 
-            # Glow rings
+            # Glow rings — scaled to stay within bar height
+            max_glow = h // 2 - 2
             for i in range(3, 0, -1):
-                p.setBrush(QBrush(QColor(255, 30, 30, int(70 * pulse * i / 3))))
-                p.drawEllipse(dx - dr * i, dy - dr * i, dr * 2 * i, dr * 2 * i)
+                ring_r = dr + int((max_glow - dr) * i / 3)
+                p.setBrush(QBrush(QColor(255, 30, 30, int(55 * pulse * i / 3))))
+                p.drawEllipse(dx - ring_r, dy - ring_r, ring_r * 2, ring_r * 2)
 
             # Red core
             p.setBrush(QBrush(QColor(255, 40, 40, int(220 + 35 * pulse))))
