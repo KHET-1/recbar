@@ -505,15 +505,21 @@ class IndicatorBar(QWidget):
         """Controls zone: connection dot, disk warning, auto-scene, gear, close."""
         bw_ = max(22, h // 2)
 
-        # Connection status dot
+        # Connection status dot + OBS label
         cd = max(3, h // 10)
         p.setPen(Qt.PenStyle.NoPen)
         if self.state.connected:
-            p.setBrush(QBrush(QColor(76, 175, 80, 140)))
+            dot_c = QColor(76, 175, 80, 140)
         else:
             p_dot = 0.5 + 0.5 * math.sin(self.pulse_phase * 2)
-            p.setBrush(QBrush(QColor(100, 100, 120, int(60 + 80 * p_dot))))
+            dot_c = QColor(100, 100, 120, int(60 + 80 * p_dot))
+        p.setBrush(QBrush(dot_c))
         p.drawEllipse(z.x() + 3, h // 2 - cd, cd * 2, cd * 2)
+        p.setFont(sm)
+        p.setPen(dot_c)
+        p.drawText(z.x() + cd * 2 + 8, 0, 60, h,
+                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                   "OBS")
 
         # Disk warning
         if 0 < self.state.disk_free_gb < DISK_WARN_GB:
@@ -530,12 +536,15 @@ class IndicatorBar(QWidget):
             p.drawText(z.adjusted(4, 0, -bw_ * 2 - 10, 0),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, "AUTO")
 
-        # Settings gear
+        # Size toggle — overlapping rectangles icon
         gr = QRect(z.right() - bw_ * 2 - 6, 0, bw_, h)
         self._click_zones["settings"] = gr
-        p.setFont(QFont(self._mono_font, max(9, fs)))
-        p.setPen(QColor("#556677"))
-        p.drawText(gr, Qt.AlignmentFlag.AlignCenter, "\u2699")
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor("#556677"), max(1, h // 32)))
+        cx, cy = gr.center().x(), gr.center().y()
+        u = max(3, h // 8)
+        p.drawRect(cx - u, cy - u, u, u)
+        p.drawRect(cx - 1, cy - 1, int(u * 1.5), int(u * 1.5))
 
         # Close X
         cr = QRect(z.right() - bw_ - 2, 0, bw_, h)
