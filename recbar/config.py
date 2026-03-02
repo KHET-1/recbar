@@ -19,7 +19,7 @@ def load_config():
     defaults = {
         "position": "bottom",
         "recording_path": "~/Videos/OBS",
-        "web_port": 5555,
+        "web_port": 7777,
         "disk_warn_gb": 5.0,
         "obs_host": "localhost",
         "obs_port": 4455,

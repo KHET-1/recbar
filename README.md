@@ -135,7 +135,7 @@ recbar-test                     # Run 14-step visual test suite
 When RecBar launches, it prints a URL with a one-time auth token:
 
 ```
-  Remote: http://192.168.1.100:5555?token=abc123...
+  Remote: http://192.168.1.100:7777?token=abc123...
 ```
 
 Open that URL on your phone for full recording control — scenes, reactions, chapters, mic toggle. Token changes every launch. LAN-only.
@@ -148,7 +148,7 @@ Edit `~/.config/recbar/config.json`:
 {
     "position": "bottom",
     "recording_path": "~/Videos/OBS",
-    "web_port": 5555,
+    "web_port": 7777,
     "obs_host": "localhost",
     "obs_port": 4455,
     "mic_input_name": "Mic/Aux",

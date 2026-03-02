@@ -11,10 +11,12 @@ def test_load_config_defaults():
     import recbar.config as cfg
     original = cfg.CONFIG_PATH
     cfg.CONFIG_PATH = "/tmp/recbar_test_nonexistent_config.json"
+    old_fallback = cfg._OLD_CONFIG
+    cfg._OLD_CONFIG = "/tmp/recbar_test_nonexistent_old.json"
     try:
         result = cfg.load_config()
         assert result["position"] == "bottom"
-        assert result["web_port"] == 5555
+        assert result["web_port"] == 7777
         assert result["obs_host"] == "localhost"
         assert result["obs_port"] == 4455
         assert result["mic_input_name"] == "Mic/Aux"
@@ -23,6 +25,7 @@ def test_load_config_defaults():
         assert isinstance(result["auto_scene_rules"], list)
     finally:
         cfg.CONFIG_PATH = original
+        cfg._OLD_CONFIG = old_fallback
 
 
 def test_load_config_from_file():
@@ -65,7 +68,7 @@ def test_load_config_malformed_json():
     try:
         result = cfg.load_config()
         assert result["position"] == "bottom"  # fell back to defaults
-        assert result["web_port"] == 5555
+        assert result["web_port"] == 7777
     finally:
         cfg.CONFIG_PATH = original
         os.unlink(tmp_path)
