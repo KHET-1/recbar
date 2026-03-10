@@ -279,13 +279,26 @@ class IndicatorBar(QWidget):
         sm.setStyleHint(QFont.StyleHint.Monospace)
 
         self._draw_background(painter, w, h, gw_base)
-        self._draw_rec_zone(painter, zones["rec"], font, h)
-        self._draw_mic_zone(painter, zones["mic"], sm, fs, h)
-        self._draw_scene_name(painter, zones["scene"], font, h)
-        self._draw_scene_buttons(painter, zones["scenes"], h)
-        self._draw_time_zone(painter, zones["time"], font, fs, h)
-        self._draw_controls(painter, zones["ctrl"], sm, fs, h)
+
+        # Clip each zone to prevent cross-zone bleed at large sizes
+        for name, draw_fn in [
+            ("rec",    lambda p: self._draw_rec_zone(p, zones["rec"], font, h)),
+            ("mic",    lambda p: self._draw_mic_zone(p, zones["mic"], sm, fs, h)),
+            ("scene",  lambda p: self._draw_scene_name(p, zones["scene"], font, h)),
+            ("scenes", lambda p: self._draw_scene_buttons(p, zones["scenes"], h)),
+            ("time",   lambda p: self._draw_time_zone(p, zones["time"], font, fs, h)),
+            ("ctrl",   lambda p: self._draw_controls(p, zones["ctrl"], sm, fs, h)),
+        ]:
+            painter.save()
+            painter.setClipRect(zones[name])
+            draw_fn(painter)
+            painter.restore()
+
+        # Rec dot drawn last — clips to widget bounds only (glow intentionally cross-zone)
+        painter.save()
+        painter.setClipRect(0, 0, w, h)
         self._draw_rec_dot(painter, zones["rec"], h)
+        painter.restore()
 
         painter.end()
 
@@ -503,7 +516,13 @@ class IndicatorBar(QWidget):
 
     def _draw_controls(self, p, z, sm, fs, h):
         """Controls zone: connection dot, disk warning, auto-scene, gear, close."""
-        bw_ = max(22, h // 2)
+        # Button width scales with height but is capped at 1/4 of zone width
+        # so buttons never crowd out the OBS label on any screen size.
+        bw_ = min(max(22, h // 2), z.width() // 4)
+
+        # Gear + close take rightmost portion; OBS label gets what remains
+        btn_total = bw_ * 2 + 8          # gear + close + gap
+        label_right = z.right() - btn_total - 4   # right edge for text content
 
         # Connection status dot + OBS label
         cd = max(3, h // 10)
@@ -515,29 +534,38 @@ class IndicatorBar(QWidget):
             dot_c = QColor(100, 100, 120, int(60 + 80 * p_dot))
         p.setBrush(QBrush(dot_c))
         p.drawEllipse(z.x() + 3, h // 2 - cd, cd * 2, cd * 2)
-        p.setFont(sm)
-        p.setPen(dot_c)
-        p.drawText(z.x() + cd * 2 + 8, 0, 60, h,
-                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                   "OBS")
 
-        # Disk warning
+        obs_label_x = z.x() + cd * 2 + 8
+        obs_label_w = max(0, label_right - obs_label_x)
+        if obs_label_w > 4:
+            p.setFont(sm)
+            p.setPen(dot_c)
+            p.drawText(obs_label_x, 0, obs_label_w, h,
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       "OBS")
+
+        # Disk warning — shown below OBS at size3, inline otherwise
         if 0 < self.state.disk_free_gb < DISK_WARN_GB:
             p.setFont(sm)
             p.setPen(QColor("#f44336"))
-            p.drawText(z.adjusted(4, 0, 0, 0),
-                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                       f"\u26A0 {self.state.disk_free_gb:.0f}GB")
+            if self.current_size == 3:
+                p.drawText(z.x() + 4, h // 2, obs_label_w, h // 2,
+                           Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                           f"\u26A0 {self.state.disk_free_gb:.0f}GB")
+            else:
+                p.drawText(z.adjusted(4, 0, -btn_total - 4, 0),
+                           Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                           f"\u26A0 {self.state.disk_free_gb:.0f}GB")
 
-        # Auto-scene indicator
+        # Auto-scene indicator — right-aligned against button area
         if self.state.auto_scene_enabled:
             p.setFont(QFont(self._mono_font, max(6, fs - 4)))
             p.setPen(QColor("#4CAF50"))
-            p.drawText(z.adjusted(4, 0, -bw_ * 2 - 10, 0),
+            p.drawText(z.x(), 0, max(0, label_right - z.x() - 4), h,
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, "AUTO")
 
         # Size toggle — overlapping rectangles icon
-        gr = QRect(z.right() - bw_ * 2 - 6, 0, bw_, h)
+        gr = QRect(z.right() - btn_total + 2, 0, bw_, h)
         self._click_zones["settings"] = gr
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(QColor("#556677"), max(1, h // 32)))
@@ -561,7 +589,9 @@ class IndicatorBar(QWidget):
         if self.state.recording and not self.state.paused:
             pulse = 0.4 + 0.6 * (0.5 + 0.5 * math.sin(self.pulse_phase * 1.5))
             dr = max(5, h // 5)
-            dx = rz.x() + 6 + dr
+            max_glow = h // 2 - 2
+            # Clamp dx so glow rings never go negative (size3 issue: dr=25, ring_r up to 62)
+            dx = max(rz.x() + max_glow + 1, rz.x() + 6 + dr)
             dy = h // 2
 
             p.setPen(Qt.PenStyle.NoPen)
@@ -571,7 +601,6 @@ class IndicatorBar(QWidget):
             p.drawEllipse(dx - dr - 4, dy - dr - 4, (dr + 4) * 2, (dr + 4) * 2)
 
             # Glow rings — scaled to stay within bar height
-            max_glow = h // 2 - 2
             for i in range(3, 0, -1):
                 ring_r = dr + int((max_glow - dr) * i / 3)
                 p.setBrush(QBrush(QColor(255, 30, 30, int(55 * pulse * i / 3))))
